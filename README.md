@@ -8,10 +8,21 @@ These scripts handle "obsolete" commits, merged commits, and branching histories
 
 ## Setup
 
-Add to your shell rc file (`.zshrc` / `.bashrc`):
-```bash
-source git_bash_functions.sh
-```
+1.  Download the script to your home directory:
+
+    ```bash
+    curl -o ~/.git_bash_functions.sh https://raw.githubusercontent.com/methylDragon/git-scripts/main/git_bash_functions.sh
+    ```
+
+2.  Add the following line to your `.bashrc` or `.zshrc` file:
+
+    ```bash
+    source ~/.git_bash_functions.sh
+    ```
+
+3.  Restart your shell or run `source ~/.git_bash_functions.sh`.
+
+To update the script, simply run the `curl` command from step 1 again.
 
 ## Usage
 
