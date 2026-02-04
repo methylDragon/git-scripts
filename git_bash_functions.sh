@@ -103,23 +103,22 @@ _git_update_target() {
 # Uses `git merge-base --independent` to filter the list in O(1) Git operations.
 _git_find_tips() {
   local branches=("${@}")
-  [[ ${#branches[@]} -eq 0 ]] && return 0
+  local tips=()
 
-  # Get hashes of commits that are "independent" (not reachable from others in the list)
-  local tip_hashes
-  tip_hashes=$(git merge-base --independent "${branches[@]}")
-
-  local unique_tips=()
   for branch in "${branches[@]}"; do
-    local hash
-    hash=$(git rev-parse "$branch")
-    if [[ "$tip_hashes" == *"$hash"* ]]; then
-      unique_tips+=("$branch")
+    local is_tip=true
+    for other_branch in "${branches[@]}"; do
+      if [[ "$branch" != "$other_branch" ]] && git merge-base --is-ancestor "$branch" "$other_branch"; then
+        is_tip=false
+        break
+      fi
+    done
+    if [[ "$is_tip" == "true" ]]; then
+      tips+=("$branch")
     fi
   done
 
-  # Return unique sorted list
-  printf "%s\n" "${unique_tips[@]}" | sort -u
+  printf "%s\n" "${tips[@]}" | sort -u
 }
 
 # Find the optimal "Cut Point" commit for the purposes of rebasing.
@@ -145,6 +144,70 @@ _git_find_cut_point() {
       return 0
     fi
   done
+}
+
+# Finds the best sync point for a branch that is part of a forking stack.
+#
+# When rebasing forking stacks, we need to be careful to not rebase the
+# shared history twice. This function finds the closest ancestor of the
+# given branch that has already been rebased, and returns the branch name,
+# the old hash, and the new hash of that ancestor.
+#
+# Args:
+#   1: The branch to find the sync point for.
+#   2: The list of all branches in the stack.
+#   3: The map of initial branch hashes.
+#
+# Output:
+#   A string containing the sync branch, the old hash, and the new hash,
+#   separated by spaces.
+_git_find_sync_point() {
+  local branch="$1"
+  declare -n _all_branches="$2"
+  declare -n _initial_ref_map="$3"
+
+  echo "branch: $branch" >&2
+  echo "_all_branches: ${_all_branches[@]}" >&2
+  echo "_initial_ref_map: " >&2
+  for key in "${!_initial_ref_map[@]}"; do
+    echo "  $key: ${_initial_ref_map[$key]}" >&2
+  done
+
+
+  local sync_branch=""
+  local sync_old_hash=""
+  local sync_new_hash=""
+  local best_dist=999999
+
+  for candidate in "${_all_branches[@]}"; do
+    [[ "$candidate" == "$branch" ]] && continue
+
+    # 1. Check Ancestry using SNAPSHOT hashes.
+    # We must use the old topology to establish relationship, as the candidate
+    # might have already moved to the new topology.
+    local candidate_initial_hash="${_initial_ref_map[$candidate]}"
+    echo "checking ancestor: $candidate_initial_hash $branch" >&2
+    if git merge-base --is-ancestor "$candidate_initial_hash" "$branch"; then
+      # 2. Check for Movement.
+      # Has this ancestor been rebased by a previous iteration of this loop?
+      local candidate_curr_hash
+      candidate_curr_hash=$(git rev-parse "$candidate")
+      if [[ "$candidate_curr_hash" != "$candidate_initial_hash" ]]; then
+        # 3. Calculate Distance using INITIAL hashes.
+        # We must measure "how close" the ancestor is on the ORIGINAL graph.
+        local dist
+        dist=$(git rev-list --count "$candidate_initial_hash..$branch")
+        if ((dist < best_dist)); then
+          best_dist=$dist
+          sync_branch="$candidate"
+          sync_old_hash="$candidate_initial_hash"
+          sync_new_hash="$candidate_curr_hash"
+        fi
+      fi
+    fi
+  done
+
+  echo "$sync_branch $sync_old_hash $sync_new_hash"
 }
 
 # Generates a visual tree string for the stack.
@@ -207,8 +270,10 @@ _git_format_stack_tree() {
       distance=$(git rev-list --count "$child..$tip")
       sorted_children+=("$distance $child")
     done
+
     IFS=$'\n' sorted_children=($(sort -n <<<"${sorted_children[*]}"))
     unset IFS
+
     children=()
     for item in "${sorted_children[@]}"; do
       children+=("${item#* }")
@@ -284,11 +349,18 @@ git_rebase_prefix() {
   local unique_tips=($(_git_find_tips "${all_branches[@]}"))
   echo "  Found ${#unique_tips[@]} stack tips."
 
+  # Snapshotting
+  # We must map every branch to its hash BEFORE we start rebasing anything.
+  # This allows us to calculate topological distance on the "Original Graph"
+  # later, even after we have started moving parts of the tree.
+  declare -A initial_ref_map
+  for branch in "${all_branches[@]}"; do
+    initial_ref_map["$branch"]=$(git rev-parse "$branch")
+  done
+
   local success_log=()
   local skipped_log=()
   local failed_log=()
-
-  # Tracking lists for cleanup logic
   local skipped_branches_flat=()
   local kept_branches_flat=()
 
@@ -319,20 +391,34 @@ git_rebase_prefix() {
     done
 
     # --- Case 2: Rebase ---
-    local cut_point
-    cut_point=$(_git_find_cut_point "$branch" "$target")
+    # If a stack forks, and we rebase one of the forks, the common history
+    # is duplicated. To avoid this, we need to find the closest ancestor
+    # of the current branch that has already been rebased, and then rebase
+    # the current branch on top of that.
+    local sync_point
+    sync_point=$(_git_find_sync_point "$branch" all_branches initial_ref_map)
+    read -r sync_branch sync_old_hash sync_new_hash <<<"$sync_point"
 
     local rebase_ok=false
-    if [[ -n "$cut_point" ]]; then
-      echo "⚡ Found obsolete ancestor: ${cut_point:0:7}"
-      echo "  Dropping it; grafting stack onto $target..."
-      if git rebase --update-refs --onto "$target" "$cut_point" "$branch"; then
+    if [[ -n "$sync_branch" ]]; then
+      echo "    ✨ Detected shared history! Linking onto updated '$sync_branch'..."
+      if git rebase --update-refs --onto "$sync_new_hash" "$sync_old_hash" "$branch"; then
         rebase_ok=true
       fi
     else
-      echo "  Standard rebase onto $target..."
-      if git rebase --update-refs "$target" "$branch"; then
-        rebase_ok=true
+      local cut_point
+      cut_point=$(_git_find_cut_point "$branch" "$target")
+      if [[ -n "$cut_point" ]]; then
+        echo "⚡ Found obsolete ancestor: ${cut_point:0:7}"
+        echo "  Dropping it; grafting stack onto $target..."
+        if git rebase --update-refs --onto "$target" "$cut_point" "$branch"; then
+          rebase_ok=true
+        fi
+      else
+        echo "  Standard rebase onto $target..."
+        if git rebase --update-refs "$target" "$branch"; then
+          rebase_ok=true
+        fi
       fi
     fi
 
