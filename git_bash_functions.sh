@@ -198,11 +198,21 @@ _git_format_stack_tree() {
     children+=("$ref")
   done
 
-  # Sort children for consistency
-  # Note: logic prevents sorting if empty to avoid syntax errors/empty elements
+  # Sort children by distance from the tip so that the tree is displayed
+  # in a more logical order (closest to the tip first).
   if [ ${#children[@]} -gt 0 ]; then
-    IFS=$'\n' children=($(sort <<<"${children[*]}"))
+    local sorted_children=()
+    for child in "${children[@]}"; do
+      local distance
+      distance=$(git rev-list --count "$child..$tip")
+      sorted_children+=("$distance $child")
+    done
+    IFS=$'\n' sorted_children=($(sort -n <<<"${sorted_children[*]}"))
     unset IFS
+    children=()
+    for item in "${sorted_children[@]}"; do
+      children+=("${item#* }")
+    done
   fi
 
   # Format the tree
