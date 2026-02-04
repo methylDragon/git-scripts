@@ -17,7 +17,7 @@ setup() {
   a1_hash=$(git rev-parse HEAD)
   commit "a2"
   git checkout main
-  git cherry-pick "$a1_hash"
+  commit "a1"
 }
 
 teardown() {

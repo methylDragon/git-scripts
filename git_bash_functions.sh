@@ -59,6 +59,19 @@ _git_is_obsolete() {
     return 0
   fi
 
+  # Strategy 3: Tree Hash Match in History (Handles Reverts)
+  # This is a fallback for complex cases like reverts or certain types of
+  # squash merges where the above checks aren't sufficient.
+  # We check if the exact tree of the commit exists anywhere in the target's
+  # recent history.
+  local commit_tree
+  commit_tree=$(git rev-parse "$commit^{tree}")
+  local target_history_trees
+  target_history_trees=$(git log --max-count=100 --pretty=%T "$target")
+  if echo "$target_history_trees" | grep -Fxq "$commit_tree"; then
+    return 0
+  fi
+
   return 1
 }
 
@@ -625,7 +638,7 @@ git_evolve() {
         # Rebase Range: (Old_Sync_Hash .. Tip] -> Onto New_Sync_Hash
         if git rebase --update-refs --onto "$sync_new_hash" "$sync_old_hash" "$tip"; then
           echo "    ✅ Success."
-          ((success_count++))
+          ((++success_count))
         else
           echo "    💥 Conflict. Aborting..."
           git rebase --abort 2>/dev/null
@@ -635,7 +648,7 @@ git_evolve() {
         # Standard Rebase: (Old_Base .. Tip] -> Onto New_Base
         if git rebase --update-refs --onto "$new_hash" "$old_hash" "$tip"; then
           echo "    ✅ Success."
-          ((success_count++))
+          ((++success_count))
         else
           echo "    💥 Conflict. Aborting..."
           git rebase --abort 2>/dev/null
@@ -647,7 +660,7 @@ git_evolve() {
     echo -e "\n========================================"
     if [[ ${#failed_log[@]} -eq 0 ]]; then
       echo "✨ All Done! ($success_count stacks evolved)"
-      git checkout "$new_hash" 2>/dev/null || git checkout -
+      git checkout "$current_branch" 2>/dev/null
       return 0
     else
       echo "⚠️  SUMMARY: $success_count succeeded, ${#failed_log[@]} failed."
@@ -656,7 +669,7 @@ git_evolve() {
       for entry in "${failed_log[@]}"; do
         echo "  - $entry"
       done | sed 's/^/  /'
-      git checkout "$new_hash" 2>/dev/null || git checkout -
+      git checkout "$current_branch" 2>/dev/null
       return 1
     fi
   else
@@ -703,7 +716,7 @@ git_push_prefix() {
     elif [[ "$local_hash" != "$remote_hash" ]]; then
       branches_to_push+=("$branch") # Has updates (or needs force push)
     else
-      ((up_to_date_count++))
+      ((++up_to_date_count))
     fi
   done < <(git for-each-ref --format='%(refname:short) %(objectname)' "refs/heads/${prefix}*")
 

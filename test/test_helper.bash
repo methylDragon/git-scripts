@@ -47,7 +47,8 @@ teardown_repo() {
 commit() {
   echo "$1" > "$1.txt"
   git add .
-  git commit -m "$1"
+  # Timestamp to keep the commits distinct
+  git commit -m "$1 $(date +%s%3N)"
 }
 
 assert_parent() {
