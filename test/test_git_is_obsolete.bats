@@ -77,3 +77,25 @@ teardown() {
   run _git_is_obsolete "feature/a" "main"
   assert_success
 }
+
+@test "_git_is_obsolete: detects squash-merged commits" {
+  # main
+  # └─ initial
+  #    └─ a1+a2 (squashed)
+  #
+  # feature/a
+  # └─ initial
+  #    ├─ a1
+  #    └─ a2
+  commit "initial"
+  git checkout -b "feature/a"
+  commit "a1"
+  commit "a2"
+
+  git checkout main
+  git merge --squash "feature/a"
+  git commit -m "squash a1 and a2"
+
+  run _git_is_obsolete "feature/a" "main"
+  assert_success
+}
