@@ -90,6 +90,12 @@ _git_update_target() {
   local current
   current=$(git branch --show-current)
   if [[ "$current" != "$target" ]]; then
+    if _git_is_in_another_worktree "$target"; then
+      echo "⚠️  Warning: Target branch '$target' is in another worktree. Fetching its remote tracking branch instead."
+      git fetch origin "$target" 2>/dev/null || true
+      return 0 # Successfully did nothing to the local branch
+    fi
+
     if ! git checkout "$target" 2>/dev/null; then
       echo "❌ Error: Could not checkout '$target'."
       return 1
@@ -179,14 +185,6 @@ _git_find_sync_point() {
   declare -n _all_branches="$2"
   declare -n _initial_ref_map="$3"
 
-  echo "branch: $branch" >&2
-  echo "_all_branches: ${_all_branches[@]}" >&2
-  echo "_initial_ref_map: " >&2
-  for key in "${!_initial_ref_map[@]}"; do
-    echo "  $key: ${_initial_ref_map[$key]}" >&2
-  done
-
-
   local sync_branch=""
   local sync_old_hash=""
   local sync_new_hash=""
@@ -222,6 +220,129 @@ _git_find_sync_point() {
 
   echo "$sync_branch $sync_old_hash $sync_new_hash"
 }
+
+# Checks if a given branch is checked out in a worktree other than the current one.
+#
+# Args:
+#   1: The branch name to check.
+#
+# Returns:
+#   0 if the branch is in another worktree, 1 otherwise.
+_git_is_in_another_worktree() {
+  local branch_name="$1"
+  
+  # A branch can only be checked out in one worktree at a time.
+  # If it is the current branch, it cannot be in *another* worktree.
+  if [[ "$(git branch --show-current)" == "$branch_name" ]]; then
+    return 1
+  fi
+
+  # Safely check if it's checked out in ANY worktree using --porcelain and exact match
+  if git worktree list --porcelain 2>/dev/null | grep -Fxq "branch refs/heads/$branch_name"; then
+    return 0 # It's in another worktree
+  fi
+
+  return 1 # It's not in another worktree
+}
+
+_git_checkout_if_safe() {
+  local branch="$1"
+  local current_branch
+  current_branch=$(git branch --show-current)
+
+  if [[ "$current_branch" == "$branch" ]]; then
+    return 0
+  fi
+
+  if _git_is_in_another_worktree "$branch"; then
+    echo "⚠️  Warning: Branch '$branch' is checked out in another worktree."
+    return 1
+  fi
+
+  git checkout "$branch" 2>/dev/null
+}
+
+_git_detach_worktrees() {
+  local prefix="$1"
+  declare -n _detached_map="$2"
+
+  local worktrees
+  worktrees=$(git worktree list --porcelain 2>/dev/null)
+  
+  local current_wt=""
+  # git worktree list porcelain separates records with empty lines
+  while read -r line; do
+    if [[ "$line" == worktree\ * ]]; then
+      current_wt="${line#worktree }"
+    elif [[ -n "$prefix" && "$line" == branch\ refs/heads/${prefix}* ]] || [[ -z "$prefix" && "$line" == branch\ refs/heads/* ]]; then
+      local branch_name="${line#branch refs/heads/}"
+      
+      # Don't detach if it's the current worktree
+      if [[ "$current_wt" == "$(git rev-parse --show-toplevel)" ]]; then
+        continue
+      fi
+
+      # Check if worktree is busy
+      local git_dir
+      git_dir=$(cd "$current_wt" && git rev-parse --git-dir)
+      if [[ -f "$git_dir/MERGE_HEAD" ]] || [[ -d "$git_dir/rebase-merge" ]] || [[ -d "$git_dir/rebase-apply" ]]; then
+        echo "⚠️  Warning: Worktree '$current_wt' is busy. Skipping detach for '$branch_name'."
+        continue
+      fi
+
+      local sha
+      sha=$(git rev-parse "$branch_name")
+      
+      echo "    Detaching '$branch_name' in worktree '$current_wt'..."
+      if (cd "$current_wt" && git checkout "$sha" --detach 2>/dev/null); then
+        _detached_map["$current_wt"]="$branch_name"
+      fi
+    fi
+  done <<< "$worktrees"
+}
+
+_git_reattach_worktrees() {
+  declare -n _detached_map="$1"
+  for wt in "${!_detached_map[@]}"; do
+    local branch_name="${_detached_map[$wt]}"
+    echo "    Reattaching '$branch_name' in worktree '$wt'..."
+    if ! (cd "$wt" && git checkout "$branch_name" 2>/dev/null); then
+      echo "⚠️  Warning: Could not re-attach '$branch_name' in '$wt'."
+    fi
+  done
+}
+
+# Executes a given function in all worktrees of the current repository.
+#
+# Args:
+#   1: The name of the function to execute.
+#   @: The arguments to pass to the function.
+_git_run_in_all_worktrees() {
+  local function_name="$1"
+  shift
+
+  local worktree_dirs
+  worktree_dirs=$(git worktree list 2>/dev/null | awk '{print $1}')
+  if [[ -z "$worktree_dirs" ]]; then
+    echo "No worktrees found."
+    "$function_name" "$@"
+    return
+  fi
+
+  local original_dir
+  original_dir=$(pwd)
+  for dir in $worktree_dirs; do
+    echo -e "\n========================================"
+    echo "### Processing Worktree: $dir ###"
+    echo "========================================"
+    if [[ -d "$dir" ]]; then
+      (cd "$dir" && "$function_name" "$@")
+    else
+      echo "⚠️  Warning: Worktree directory not found: $dir"
+    fi
+  done
+}
+
 
 # Generates a visual tree string for the stack.
 # Format:
@@ -331,10 +452,16 @@ _git_format_stack_tree() {
 #   - Summary: Records successes and failures per stack and prints a summary at the end.
 #
 # Usage:
-#   rebase_prefix <prefix> [target_branch]
-#   rebase_prefix -h | --help
+#   git_rebase_prefix <prefix> [target_branch]
+#   git_rebase_prefix --all-worktrees <prefix> [target_branch]
 # ------------------------------------------------------------------------------
 git_rebase_prefix() {
+  local all_worktrees=false
+  if [[ "$1" == "--all-worktrees" ]]; then
+    all_worktrees=true
+    shift
+  fi
+
   _git_check_version || return 1
 
   local prefix="$1"
@@ -345,22 +472,34 @@ git_rebase_prefix() {
   [[ -z "$prefix" ]] && { echo "❌ Error: Missing <prefix>."; return 1; }
 
   if ! _git_update_target "$target"; then
-    git checkout "$start_branch" 2>/dev/null
+    _git_checkout_if_safe "$start_branch"
     return 1
   fi
 
+  declare -A detached_map
+  if [[ "$all_worktrees" == "true" ]]; then
+    echo "🔄 Detaching worktrees for cross-worktree rebase..."
+    _git_detach_worktrees "$prefix" detached_map
+  fi
+
   echo "🔍 Scanning 'refs/heads/${prefix}*'..."
-  local all_branches=($(git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}*"))
-  all_branches=(${all_branches[@]/$target})
+  local raw_branches=($(git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}*"))
+  local all_branches=()
+  for branch in "${raw_branches[@]}"; do
+    if [[ "$branch" != "$target" ]]; then
+      all_branches+=("$branch")
+    fi
+  done
 
   if [[ ${#all_branches[@]} -eq 0 ]]; then
     echo "  No matching branches found."
-    git checkout "$start_branch" 2>/dev/null
+    _git_checkout_if_safe "$start_branch"
     return 0
   fi
 
   local unique_tips=($(_git_find_tips "${all_branches[@]}"))
   echo "  Found ${#unique_tips[@]} stack tips."
+
 
   # Snapshotting
   # We must map every branch to its hash BEFORE we start rebasing anything.
@@ -501,7 +640,18 @@ git_rebase_prefix() {
     fi
   fi
 
-  git checkout "$start_branch" 2>/dev/null
+  if [[ "$(git branch --show-current)" != "$start_branch" ]]; then
+    if ! _git_is_in_another_worktree "$start_branch"; then
+      git checkout "$start_branch" 2>/dev/null
+    fi
+  fi
+
+  if [[ "$all_worktrees" == "true" ]]; then
+    _git_reattach_worktrees detached_map
+  fi
+
+  _git_reattach_worktrees detached_map
+
   [[ ${#failed_log[@]} -gt 0 ]] && return 1 || return 0
 }
 
@@ -549,6 +699,10 @@ git_evolve() {
   fi
 
   echo "🔍 Scanning for stacks displaced by move from ${old_hash:0:7} to ${new_hash:0:7}..."
+
+  declare -A detached_map
+  echo "🔄 Detaching worktrees for cross-worktree evolve..."
+  _git_detach_worktrees "" detached_map
 
   # Find branches currently pointing to the OLD history
   local candidates
@@ -660,7 +814,9 @@ git_evolve() {
     echo -e "\n========================================"
     if [[ ${#failed_log[@]} -eq 0 ]]; then
       echo "✨ All Done! ($success_count stacks evolved)"
-      git checkout "$current_branch" 2>/dev/null
+      if [[ "$(git branch --show-current)" != "$current_branch" ]]; then
+        _git_checkout_if_safe "$current_branch"
+      fi
       return 0
     else
       echo "⚠️  SUMMARY: $success_count succeeded, ${#failed_log[@]} failed."
@@ -669,7 +825,9 @@ git_evolve() {
       for entry in "${failed_log[@]}"; do
         echo "  - $entry"
       done | sed 's/^/  /'
-      git checkout "$current_branch" 2>/dev/null
+      if [[ "$(git branch --show-current)" != "$current_branch" ]]; then
+        _git_checkout_if_safe "$current_branch"
+      fi
       return 1
     fi
   else
@@ -682,12 +840,20 @@ git_evolve() {
 #
 # Usage:
 #   git_push_prefix "feature/login-"
+#   git_push_prefix --all-worktrees "feature/login-"
 #   git_push_prefix "feature/login-" --force-with-lease
 #
 # Atomically pushes branches matching the prefix to origin.
 # Skips branches where local HEAD == origin HEAD.
 # ------------------------------------------------------------------------------
 git_push_prefix() {
+  if [[ "$1" == "--all-worktrees" ]]; then
+    shift
+    # Flag is obsolete since push works globally, but we shift it away for backwards compatibility
+  fi
+
+  _git_check_version || return 1
+
   local prefix="$1"
   shift
   local push_opts=("$@")
@@ -761,24 +927,37 @@ git_prune_local_branches() {
   echo "🔄 Fetching origin --prune..."
   git fetch -p
 
-  # Safe parsing: 'git branch -vv' puts a '*' in column 1 if it's the current branch.
-  # We check for that to ensure we get the branch name (column 2) in that case.
-  local branches
-  branches=$(git branch -vv | grep ': gone]' | awk '{if ($1 == "*") print $2; else print $1}')
+  # Get a list of all branches checked out in any worktree
+  # Use --porcelain to safely extract branches, ignoring detached HEADs
+  local worktree_branches
+  worktree_branches=$(git worktree list --porcelain 2>/dev/null | awk '/^branch / {print $2}' | sed 's#refs/heads/##')
 
-  if [[ -z "$branches" ]]; then
-    echo "✅ No orphaned branches found."
+  # Get a list of orphaned branches
+  local orphaned_branches
+  orphaned_branches=$(git branch -vv | grep ': gone]' | awk '{if ($1 == "*" || $1 == "+") print $2; else print $1}')
+
+  local branches_to_prune=()
+  if [[ -n "$orphaned_branches" ]]; then
+    for branch in $orphaned_branches; do
+      if ! echo "$worktree_branches" | grep -Fxq "$branch"; then
+        branches_to_prune+=("$branch")
+      fi
+    done
+  fi
+
+  if [[ ${#branches_to_prune[@]} -eq 0 ]]; then
+    echo "✅ No orphaned branches to prune."
     return 0
   fi
 
   if [[ "$dry_run" == "true" ]]; then
     echo "📦 [Dry Run] The following branches would be deleted:"
-    echo "$branches" | sed 's/^/    - /'
+    printf "    - %s\n" "${branches_to_prune[@]}"
     return 0
   fi
 
   echo "🗑️ Pruning branches..."
-  echo "$branches" | xargs git branch -D
+  git branch -D "${branches_to_prune[@]}"
 }
 
 # ------------------------------------------------------------------------------
