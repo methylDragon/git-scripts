@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -16,7 +16,7 @@ teardown() {
   teardown_repo
 }
 
-@test "git_push_prefix: pushes branches even if checked out in other worktrees" {
+@test "git_push_prefix: globally pushes matching branches across all detached worktrees" {
   # Create a branch in the main worktree
   git checkout -b "feature/a"
   commit "a1"
@@ -33,9 +33,6 @@ teardown() {
   assert_success
 
   # Check that both branches were pushed to the remote
-  run git --git-dir="${BATS_TEST_TMPDIR}/remote.git" branch --format='%(refname:short)'
-  assert_success
-
-  assert_line "feature/a"
-  assert_line "feature/b"
+  assert_remote_branch_exists origin "feature/a"
+  assert_remote_branch_exists origin "feature/b"
 }

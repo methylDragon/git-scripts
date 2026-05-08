@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -13,7 +13,7 @@ teardown() {
   teardown_repo
 }
 
-@test "git_push_prefix: pushes new branches" {
+@test "git_push_prefix: pushes newly created branches to the remote" {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
@@ -30,7 +30,7 @@ teardown() {
   assert_output --partial "feature/b" <<<"$remote_branches"
 }
 
-@test "git_push_prefix: skips up-to-date branches" {
+@test "git_push_prefix: skips pushing branches that are already up-to-date with the remote" {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
@@ -52,7 +52,7 @@ teardown() {
   assert_output --partial "All matched branches (1) are already up-to-date"
 }
 
-@test "git_push_prefix: pushes branches with updates" {
+@test "git_push_prefix: pushes branches containing new local commits" {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
@@ -62,14 +62,10 @@ teardown() {
   run git_push_prefix "feature/"
   assert_success
 
-  local remote_hash
-  remote_hash=$(git --git-dir=remote.git rev-parse feature/a)
-  local local_hash
-  local_hash=$(git rev-parse feature/a)
-  assert_equal "$remote_hash" "$local_hash"
+  assert_pushed_branch_matches_local "remote.git" "feature/a"
 }
 
-@test "git_push_prefix: handles no matching branches" {
+@test "git_push_prefix: gracefully completes when no branches match the given prefix" {
   commit "initial"
   run git_push_prefix "non-existent/"
   assert_success

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 @test "_git_check_version: fails on old git version" {
   git() {

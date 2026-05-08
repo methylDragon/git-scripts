@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -31,8 +31,7 @@ teardown() {
   assert_success
 
   # The branch should be gone
-  run git rev-parse --verify "feature/a"
-  assert_failure
+  assert_local_branch_is_missing "feature/a"
 }
 
 @test "git_prune_local_branches: does not prune branches with existing upstreams" {
@@ -47,8 +46,7 @@ teardown() {
   assert_success
 
   # The branch should still be there
-  run git rev-parse --verify "feature/a"
-  assert_success
+  assert_local_branch_exists "feature/a"
 }
 
 @test "git_prune_local_branches: handles no orphaned branches" {

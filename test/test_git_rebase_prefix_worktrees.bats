@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -36,20 +36,12 @@ teardown() {
   assert_success
 
   # Check that the branch in the main worktree was rebased
-  local a_parent
-  a_parent=$(git rev-parse "feature/a~1")
-  local main_head
-  main_head=$(git rev-parse "main")
-  assert_equal "$a_parent" "$main_head"
+  assert_branch_is_immediate_parent_of "main" "feature/a"
 
   # Check that the branch in the second worktree was rebased and correctly reattached
   (
-    cd "${BATS_TEST_TMPDIR}/wt-rebase" &&
-      local b_parent
-    b_parent=$(git rev-parse "feature/b~1")
-    local a_head_in_wt
-    a_head_in_wt=$(git rev-parse "feature/a")
-    assert_equal "$b_parent" "$a_head_in_wt"
+    cd "${BATS_TEST_TMPDIR}/wt-rebase" || exit 1
+    assert_branch_is_immediate_parent_of "feature/a" "feature/b"
 
     local current_branch
     current_branch=$(git branch --show-current)
@@ -124,11 +116,7 @@ teardown() {
   assert_output --partial "Warning: Worktree '${BATS_TEST_TMPDIR}/wt-busy' is busy. Skipping detach"
 
   # Check rebase succeeded for feature
-  local feature_parent
-  feature_parent=$(git rev-parse "feature/busy1~1")
-  local main_head
-  main_head=$(git rev-parse "main")
-  assert_equal "$feature_parent" "$main_head"
+  assert_branch_is_immediate_parent_of "main" "feature/busy1"
 }
 
 @test "git_rebase_prefix: --all-worktrees completes rebase but gracefully skips reattaching if blocked by untracked files" {
@@ -160,11 +148,7 @@ teardown() {
   assert_output --partial "Could not re-attach 'feature/unstaged' in '${BATS_TEST_TMPDIR}/wt-unstaged'"
 
   # Rebase should still be successful regardless of the reattach failure
-  local feature_parent
-  feature_parent=$(git rev-parse "feature/unstaged~1")
-  local main_head
-  main_head=$(git rev-parse "main")
-  assert_equal "$feature_parent" "$main_head"
+  assert_branch_is_immediate_parent_of "main" "feature/unstaged"
 
   # Verify the worktree is safely left in a detached HEAD state to preserve local files
   (

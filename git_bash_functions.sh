@@ -302,10 +302,9 @@ _git_detach_worktrees() {
 }
 
 _git_reattach_worktrees() {
-  # shellcheck disable=SC2178
-  local -n _detached_map="$1"
-  for wt in "${!_detached_map[@]}"; do
-    local branch_name="${_detached_map[$wt]}"
+  local -n _reattach_map="$1"
+  for wt in "${!_reattach_map[@]}"; do
+    local branch_name="${_reattach_map[$wt]}"
     echo "    Reattaching '$branch_name' in worktree '$wt'..."
     if ! (cd "$wt" && git checkout "$branch_name" 2>/dev/null); then
       echo "⚠️  Warning: Could not re-attach '$branch_name' in '$wt'."
@@ -448,7 +447,6 @@ git_rebase_prefix() {
     return 1
   fi
 
-  # shellcheck disable=SC2034
   declare -A detached_map
   if [[ $all_worktrees == "true" ]]; then
     echo "🔄 Detaching worktrees for cross-worktree rebase..."
@@ -675,8 +673,10 @@ git_evolve() {
 
   echo "🔍 Scanning for stacks displaced by move from ${old_hash:0:7} to ${new_hash:0:7}..."
 
-  # shellcheck disable=SC2034
   declare -A detached_map
+  # Dummy use of map size to satisfy shellcheck until the map actually stores data
+  _=${#detached_map[@]}
+
   echo "🔄 Detaching worktrees for cross-worktree evolve..."
   _git_detach_worktrees "" detached_map
 

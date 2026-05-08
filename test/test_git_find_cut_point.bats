@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 # Creates a branch `feature/a` with two commits, `a1` and `a2`.
 # `a1` is cherry-picked into `main`.

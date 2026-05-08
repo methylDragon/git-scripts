@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 # Create a complex branch structure for testing:
 #
@@ -50,24 +50,24 @@ teardown() {
 
   # We expect the 'a' stack to be a simple linear rebase.
   # test-chain-a-b should now be based on test-chain-a, and so on.
-  assert_parent "$(git rev-parse --short main)" "test-chain-a"
-  assert_parent "$(git rev-parse --short test-chain-a)" "test-chain-a-b"
-  assert_parent "$(git rev-parse --short test-chain-a-b)" "test-chain-a-b-c"
+  assert_branch_is_immediate_parent_of "main" "test-chain-a"
+  assert_branch_is_immediate_parent_of "test-chain-a" "test-chain-a-b"
+  assert_branch_is_immediate_parent_of "test-chain-a-b" "test-chain-a-b-c"
 
   # We expect the 'd' stack to have been rebased linearly up to the fork point.
-  assert_parent "$(git rev-parse --short main)" "test-chain-d"
-  assert_parent "$(git rev-parse --short test-chain-d)" "test-chain-d-e"
-  assert_parent "$(git rev-parse --short test-chain-d-e)" "test-chain-d-e-f"
+  assert_branch_is_immediate_parent_of "main" "test-chain-d"
+  assert_branch_is_immediate_parent_of "test-chain-d" "test-chain-d-e"
+  assert_branch_is_immediate_parent_of "test-chain-d-e" "test-chain-d-e-f"
 
   # We expect the first fork 'g' to be rebased on top of the new 'f'.
-  assert_parent "$(git rev-parse --short test-chain-d-e-f)" "test-chain-d-e-f-g"
-  assert_parent "$(git rev-parse --short test-chain-d-e-f-g)" "test-chain-d-e-f-g-h"
-  assert_parent "$(git rev-parse --short test-chain-d-e-f-g-h)" "test-chain-d-e-f-g-h-i"
+  assert_branch_is_immediate_parent_of "test-chain-d-e-f" "test-chain-d-e-f-g"
+  assert_branch_is_immediate_parent_of "test-chain-d-e-f-g" "test-chain-d-e-f-g-h"
+  assert_branch_is_immediate_parent_of "test-chain-d-e-f-g-h" "test-chain-d-e-f-g-h-i"
 
   # We expect the second fork 'j' to also be rebased on top of the new 'f'.
-  assert_parent "$(git rev-parse --short test-chain-d-e-f)" "test-chain-d-e-f-j"
-  assert_parent "$(git rev-parse --short test-chain-d-e-f-j)" "test-chain-d-e-f-j-k"
-  assert_parent "$(git rev-parse --short test-chain-d-e-f-j-k)" "test-chain-d-e-f-j-k-l"
+  assert_branch_is_immediate_parent_of "test-chain-d-e-f" "test-chain-d-e-f-j"
+  assert_branch_is_immediate_parent_of "test-chain-d-e-f-j" "test-chain-d-e-f-j-k"
+  assert_branch_is_immediate_parent_of "test-chain-d-e-f-j-k" "test-chain-d-e-f-j-k-l"
 }
 
 @test "git_rebase_prefix: handles rebase conflicts" {

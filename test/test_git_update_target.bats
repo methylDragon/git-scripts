@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -24,9 +24,7 @@ teardown() {
 
   run _git_update_target "feature/a"
   assert_success
-  local current_branch
-  current_branch=$(git branch --show-current)
-  assert_equal "$current_branch" "feature/a"
+  assert_current_branch "feature/a"
 }
 
 @test "_git_update_target: handles local-only branch" {
@@ -37,20 +35,15 @@ teardown() {
 }
 
 @test "_git_update_target: pulls updates from upstream" {
-  # Set up a remote
-  git remote add origin .
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
   git checkout main
   git merge "feature/a"
 
-  # Clone to a separate directory to simulate a remote
-  git clone . remote
-  (cd remote && git config user.email "test@example.com" && git config user.name "Test User" && git checkout -b feature/b && commit "b1" && git checkout main && git merge "feature/b")
-
-  # Set up upstream for main
-  git remote set-url origin remote
+  # Set up a remote
+  setup_remote_repo origin remote
+  (cd remote && git checkout -b feature/b && commit "b1" && git checkout main && git merge "feature/b")
   git fetch origin
   git branch --set-upstream-to=origin/main main
 
@@ -60,28 +53,19 @@ teardown() {
   run _git_update_target "main"
   assert_success
   assert_output --partial "Pulling updates"
-  local local_hash
-  local_hash=$(git rev-parse HEAD)
-  local remote_hash
-  remote_hash=$(git rev-parse origin/main)
-  assert_equal "$local_hash" "$remote_hash"
+  assert_branches_point_to_same_commit "HEAD" "origin/main"
 }
 
 @test "_git_update_target: fetches remote tracking branch when target is locked in another worktree" {
-  # Set up a remote
-  git remote add origin .
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
   git checkout main
   git merge "feature/a"
 
-  # Clone to a separate directory to simulate a remote
-  git clone . remote
-  (cd remote && git config user.email "test@example.com" && git config user.name "Test User" && git checkout -b feature/b && commit "b1" && git checkout main && git merge "feature/b")
-
-  # Set up upstream for main
-  git remote set-url origin remote
+  # Set up a remote
+  setup_remote_repo origin remote
+  (cd remote && git checkout -b feature/b && commit "b1" && git checkout main && git merge "feature/b")
   git fetch origin
   git branch --set-upstream-to=origin/main main
 
@@ -100,7 +84,7 @@ teardown() {
   remote_hash=$(git rev-parse origin/main)
   local remote_upstream_hash
   remote_upstream_hash=$(cd remote && git rev-parse main)
-  assert_equal "$remote_hash" "$remote_upstream_hash"
+  assert_equal "$remote_hash" "$remote_upstream_hash" "Expected origin/main to match the actual remote repo's main branch"
 
   # Cleanup
   rm -rf "${BATS_TEST_TMPDIR}/wt-locked"

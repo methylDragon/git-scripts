@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -26,6 +26,6 @@ teardown() {
   local old_hash
   old_hash=$(git rev-parse "HEAD@{1}")
   git_evolve "$old_hash" <<<"y"
-  assert_parent "$(git rev-parse --short feature/a)" "feature/b"
-  assert_parent "$(git rev-parse --short feature/b)" "feature/c"
+  assert_branch_is_immediate_parent_of "feature/a" "feature/b"
+  assert_branch_is_immediate_parent_of "feature/b" "feature/c"
 }

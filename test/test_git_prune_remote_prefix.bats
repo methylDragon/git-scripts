@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -14,7 +14,7 @@ teardown() {
   teardown_repo
 }
 
-@test "git_prune_remote_prefix: prunes merged remote branch" {
+@test "git_prune_remote_prefix: deletes remote branches completely merged into the target branch" {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
@@ -28,12 +28,10 @@ teardown() {
   run git_prune_remote_prefix "feature/"
   assert_success
 
-  # The remote branch should be gone
-  run git ls-remote --exit-code origin "refs/heads/feature/a"
-  assert_failure
+  assert_remote_branch_is_missing origin "feature/a"
 }
 
-@test "git_prune_remote_prefix: does not prune unmerged remote branches" {
+@test "git_prune_remote_prefix: skips unmerged branches on the remote" {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
@@ -42,12 +40,10 @@ teardown() {
   run git_prune_remote_prefix "feature/"
   assert_success
 
-  # The remote branch should still be there
-  run git ls-remote --exit-code origin "refs/heads/feature/a"
-  assert_success
+  assert_remote_branch_exists origin "feature/a"
 }
 
-@test "git_prune_remote_prefix: handles no matching branches" {
+@test "git_prune_remote_prefix: skips gracefully when no remote branches match the given prefix" {
   commit "initial"
   run git_prune_remote_prefix "non-existent/"
   assert_success

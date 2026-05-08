@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-load "test_helper.bash"
+load "helpers/init.bash"
 
 setup() {
   setup_repo
@@ -60,6 +60,6 @@ teardown() {
   read -r sync_branch sync_old_hash sync_new_hash <<<"$sync_point"
 
   assert_equal "$sync_branch" "test-chain-d-e-f"
-  assert_equal "$sync_old_hash" "${initial_ref_map[test-chain-d-e-f]}"
+  assert_equal "$sync_old_hash" "${initial_ref_map["test-chain-d-e-f"]}"
   assert_equal "$sync_new_hash" "$(git rev-parse test-chain-d-e-f)"
 }
