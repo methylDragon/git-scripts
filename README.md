@@ -35,3 +35,46 @@ To update the script, simply run the `curl` command from step 1 again.
 | **`git_push_prefix <prefix> [opts]`** | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git. |
 | **`git_prune_remote_prefix <prefix>`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `main`. |
 | **`git_prune_local_branches`** | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone. |
+
+## Testing
+
+This repository uses [BATS](https://github.com/bats-core/bats-core) (Bash Automated Testing System) to ensure correctness.
+
+1. **Install dependencies:**
+   Ensure you have Node.js/npm installed.
+   ```bash
+   npm install
+   ```
+
+2. **Run tests:**
+   ```bash
+   npx bats test/
+   ```
+
+3. **Run tests in parallel (Faster):**
+   If you have GNU Parallel installed, you can dramatically speed up the test suite:
+   ```bash
+   npx bats -j $(nproc) test/
+   ```
+   *(e.g., `-j 8` or `-j 16` depending on your CPU cores)*
+
+## Development
+
+If you'd like to contribute to this project, we enforce bash formatting (`shfmt`) and linting (`shellcheck`) using the `pre-commit` framework.
+
+1. **Install dependencies:** Ensure you have Python/pip installed, then install the pre-commit CLI:
+   ```bash
+   # One of these
+   pip install pre-commit
+   sudo apt install pre-commit
+   ```
+2. **Install the git hook:**
+   ```bash
+   pre-commit install
+   ```
+   Now, every time you commit, it will automatically check your scripts.
+3. **Run manually:**
+   You can trigger formatting and linting across all files without committing by running:
+   ```bash
+   pre-commit run --all-files
+   ```

@@ -1,0 +1,14 @@
+repos:
+  # shfmt formatting
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.7.0-1
+    hooks:
+      - id: shfmt
+        args: ["-w", "-s", "-i", "2"]
+
+  # Shellcheck linting
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.9.0
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning"]
