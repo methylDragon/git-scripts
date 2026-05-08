@@ -22,7 +22,7 @@ source "git_bash_functions.sh"
 # The path to the repository is stored in the global variable REPO_PATH.
 setup_repo() {
   REPO_PATH=$(mktemp -d -t bats-git-repo.XXXXXX)
-  cd "$REPO_PATH"
+  cd "$REPO_PATH" || exit 1
   git init -b main
   git config --local user.email "test@example.com"
   git config --local user.name "Test User"
@@ -45,7 +45,7 @@ teardown_repo() {
 #
 # This will create a new file with the message as its content and commit it.
 commit() {
-  echo "$1" > "$1.txt"
+  echo "$1" >"$1.txt"
   git add .
   # Timestamp to keep the commits distinct
   git commit -m "$1 $(date +%s%3N)"

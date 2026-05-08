@@ -28,7 +28,8 @@ teardown() {
   #                 └── test-chain-d-e-f-j-k
   #                     └── test-chain-d-e-f-j-k-l
   #
-  local all_branches=($(git for-each-ref --format='%(refname:short)' "refs/heads/test-chain-*"))
+  local all_branches
+  mapfile -t all_branches < <(git for-each-ref --format='%(refname:short)' "refs/heads/test-chain-*")
   declare -A initial_ref_map
   for branch in "${all_branches[@]}"; do
     initial_ref_map["$branch"]=$(git rev-parse "$branch")

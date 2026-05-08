@@ -24,7 +24,8 @@ teardown() {
 
   run _git_update_target "feature/a"
   assert_success
-  local current_branch=$(git branch --show-current)
+  local current_branch
+  current_branch=$(git branch --show-current)
   assert_equal "$current_branch" "feature/a"
 }
 
@@ -59,7 +60,49 @@ teardown() {
   run _git_update_target "main"
   assert_success
   assert_output --partial "Pulling updates"
-  local local_hash=$(git rev-parse HEAD)
-  local remote_hash=$(git rev-parse origin/main)
+  local local_hash
+  local_hash=$(git rev-parse HEAD)
+  local remote_hash
+  remote_hash=$(git rev-parse origin/main)
   assert_equal "$local_hash" "$remote_hash"
+}
+
+@test "_git_update_target: fetches remote tracking branch when target is locked in another worktree" {
+  # Set up a remote
+  git remote add origin .
+  commit "initial"
+  git checkout -b "feature/a"
+  commit "a1"
+  git checkout main
+  git merge "feature/a"
+
+  # Clone to a separate directory to simulate a remote
+  git clone . remote
+  (cd remote && git config user.email "test@example.com" && git config user.name "Test User" && git checkout -b feature/b && commit "b1" && git checkout main && git merge "feature/b")
+
+  # Set up upstream for main
+  git remote set-url origin remote
+  git fetch origin
+  git branch --set-upstream-to=origin/main main
+
+  # Checkout a different branch in main worktree so we can test updating 'main'
+  git checkout -b "feature/test"
+
+  # Lock main in another worktree
+  git worktree add "${BATS_TEST_TMPDIR}/wt-locked" main
+
+  run _git_update_target "main"
+  assert_success
+  assert_output --partial "Target branch 'main' is in another worktree. Fetching its remote tracking branch instead."
+
+  # Verify the remote tracking branch was fetched and has the new commit
+  local remote_hash
+  remote_hash=$(git rev-parse origin/main)
+  local remote_upstream_hash
+  remote_upstream_hash=$(cd remote && git rev-parse main)
+  assert_equal "$remote_hash" "$remote_upstream_hash"
+
+  # Cleanup
+  rm -rf "${BATS_TEST_TMPDIR}/wt-locked"
+  git worktree prune
 }

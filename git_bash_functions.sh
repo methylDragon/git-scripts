@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # ==============================================================================
 # GIT STACK UTILITIES
 #
@@ -55,7 +56,7 @@ _git_is_obsolete() {
   # We suppress stderr; if it conflicts, the tree won't match anyway.
   merge_tree=$(git merge-tree --write-tree "$target" "$commit" 2>/dev/null)
 
-  if [[ "$merge_tree" == "$target_tree" ]]; then
+  if [[ $merge_tree == "$target_tree" ]]; then
     return 0
   fi
 
@@ -89,7 +90,7 @@ _git_update_target() {
   # Switch to target (if not already there)
   local current
   current=$(git branch --show-current)
-  if [[ "$current" != "$target" ]]; then
+  if [[ $current != "$target" ]]; then
     if _git_is_in_another_worktree "$target"; then
       echo "⚠️  Warning: Target branch '$target' is in another worktree. Fetching its remote tracking branch instead."
       git fetch origin "$target" 2>/dev/null || true
@@ -106,7 +107,7 @@ _git_update_target() {
   local upstream
   upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null)
 
-  if [[ -n "$upstream" ]]; then
+  if [[ -n $upstream ]]; then
     echo "🔄 Pulling updates from $upstream..."
     if ! git pull --rebase; then
       echo "❌ Error: Could not pull updates. Aborting."
@@ -127,12 +128,12 @@ _git_find_tips() {
   for branch in "${branches[@]}"; do
     local is_tip=true
     for other_branch in "${branches[@]}"; do
-      if [[ "$branch" != "$other_branch" ]] && git merge-base --is-ancestor "$branch" "$other_branch"; then
+      if [[ $branch != "$other_branch" ]] && git merge-base --is-ancestor "$branch" "$other_branch"; then
         is_tip=false
         break
       fi
     done
-    if [[ "$is_tip" == "true" ]]; then
+    if [[ $is_tip == "true" ]]; then
       tips+=("$branch")
     fi
   done
@@ -182,8 +183,8 @@ _git_find_cut_point() {
 #   separated by spaces.
 _git_find_sync_point() {
   local branch="$1"
-  declare -n _all_branches="$2"
-  declare -n _initial_ref_map="$3"
+  local -n _all_branches="$2"
+  local -n _initial_ref_map="$3"
 
   local sync_branch=""
   local sync_old_hash=""
@@ -191,19 +192,18 @@ _git_find_sync_point() {
   local best_dist=999999
 
   for candidate in "${_all_branches[@]}"; do
-    [[ "$candidate" == "$branch" ]] && continue
+    [[ $candidate == "$branch" ]] && continue
 
     # 1. Check Ancestry using SNAPSHOT hashes.
     # We must use the old topology to establish relationship, as the candidate
     # might have already moved to the new topology.
     local candidate_initial_hash="${_initial_ref_map[$candidate]}"
-    echo "checking ancestor: $candidate_initial_hash $branch" >&2
     if git merge-base --is-ancestor "$candidate_initial_hash" "$branch"; then
       # 2. Check for Movement.
       # Has this ancestor been rebased by a previous iteration of this loop?
       local candidate_curr_hash
       candidate_curr_hash=$(git rev-parse "$candidate")
-      if [[ "$candidate_curr_hash" != "$candidate_initial_hash" ]]; then
+      if [[ $candidate_curr_hash != "$candidate_initial_hash" ]]; then
         # 3. Calculate Distance using INITIAL hashes.
         # We must measure "how close" the ancestor is on the ORIGINAL graph.
         local dist
@@ -230,7 +230,7 @@ _git_find_sync_point() {
 #   0 if the branch is in another worktree, 1 otherwise.
 _git_is_in_another_worktree() {
   local branch_name="$1"
-  
+
   # A branch can only be checked out in one worktree at a time.
   # If it is the current branch, it cannot be in *another* worktree.
   if [[ "$(git branch --show-current)" == "$branch_name" ]]; then
@@ -250,7 +250,7 @@ _git_checkout_if_safe() {
   local current_branch
   current_branch=$(git branch --show-current)
 
-  if [[ "$current_branch" == "$branch" ]]; then
+  if [[ $current_branch == "$branch" ]]; then
     return 0
   fi
 
@@ -268,17 +268,17 @@ _git_detach_worktrees() {
 
   local worktrees
   worktrees=$(git worktree list --porcelain 2>/dev/null)
-  
+
   local current_wt=""
   # git worktree list porcelain separates records with empty lines
   while read -r line; do
-    if [[ "$line" == worktree\ * ]]; then
+    if [[ $line == worktree\ * ]]; then
       current_wt="${line#worktree }"
-    elif [[ -n "$prefix" && "$line" == branch\ refs/heads/${prefix}* ]] || [[ -z "$prefix" && "$line" == branch\ refs/heads/* ]]; then
+    elif [[ -n $prefix && $line == branch\ refs/heads/${prefix}* ]] || [[ -z $prefix && $line == branch\ refs/heads/* ]]; then
       local branch_name="${line#branch refs/heads/}"
-      
+
       # Don't detach if it's the current worktree
-      if [[ "$current_wt" == "$(git rev-parse --show-toplevel)" ]]; then
+      if [[ $current_wt == "$(git rev-parse --show-toplevel)" ]]; then
         continue
       fi
 
@@ -292,17 +292,18 @@ _git_detach_worktrees() {
 
       local sha
       sha=$(git rev-parse "$branch_name")
-      
+
       echo "    Detaching '$branch_name' in worktree '$current_wt'..."
       if (cd "$current_wt" && git checkout "$sha" --detach 2>/dev/null); then
         _detached_map["$current_wt"]="$branch_name"
       fi
     fi
-  done <<< "$worktrees"
+  done <<<"$worktrees"
 }
 
 _git_reattach_worktrees() {
-  declare -n _detached_map="$1"
+  # shellcheck disable=SC2178
+  local -n _detached_map="$1"
   for wt in "${!_detached_map[@]}"; do
     local branch_name="${_detached_map[$wt]}"
     echo "    Reattaching '$branch_name' in worktree '$wt'..."
@@ -311,38 +312,6 @@ _git_reattach_worktrees() {
     fi
   done
 }
-
-# Executes a given function in all worktrees of the current repository.
-#
-# Args:
-#   1: The name of the function to execute.
-#   @: The arguments to pass to the function.
-_git_run_in_all_worktrees() {
-  local function_name="$1"
-  shift
-
-  local worktree_dirs
-  worktree_dirs=$(git worktree list 2>/dev/null | awk '{print $1}')
-  if [[ -z "$worktree_dirs" ]]; then
-    echo "No worktrees found."
-    "$function_name" "$@"
-    return
-  fi
-
-  local original_dir
-  original_dir=$(pwd)
-  for dir in $worktree_dirs; do
-    echo -e "\n========================================"
-    echo "### Processing Worktree: $dir ###"
-    echo "========================================"
-    if [[ -d "$dir" ]]; then
-      (cd "$dir" && "$function_name" "$@")
-    else
-      echo "⚠️  Warning: Worktree directory not found: $dir"
-    fi
-  done
-}
-
 
 # Generates a visual tree string for the stack.
 # Format:
@@ -361,35 +330,35 @@ _git_format_stack_tree() {
   local prefix="$2"
   local target="$3"
   local filter_merged_in_target="$4" # "true" or "false"
-  local allowed_refs="$5"             # Space-separated list of allowed branches
+  local allowed_refs="$5"            # Space-separated list of allowed branches
 
   local tree="$tip"
   local stack_refs
 
   # Optimization: Use prefix in git command if available
-  if [[ -n "$prefix" ]]; then
+  if [[ -n $prefix ]]; then
     stack_refs=$(git branch --format='%(refname:short)' --list "${prefix}*" --merged "$tip")
   else
     stack_refs=$(git branch --format='%(refname:short)' --merged "$tip")
   fi
 
   local target_refs=""
-  if [[ "$filter_merged_in_target" == "true" ]] && [[ -n "$target" ]]; then
+  if [[ $filter_merged_in_target == "true" ]] && [[ -n $target ]]; then
     target_refs=$(git branch --format='%(refname:short)' --list "${prefix}*" --merged "$target")
   fi
 
   # Accumulate children
   local children=()
   for ref in $stack_refs; do
-    [[ "$ref" == "$tip" ]] && continue
+    [[ $ref == "$tip" ]] && continue
 
     # Filter: Allowed Refs (Whitelist)
-    if [[ -n "$allowed_refs" ]]; then
-      if [[ ! " $allowed_refs " =~ " $ref " ]]; then continue; fi
+    if [[ -n $allowed_refs ]]; then
+      if [[ " $allowed_refs " != *" $ref "* ]]; then continue; fi
     fi
 
     # Filter: Already merged in target
-    if [[ "$filter_merged_in_target" == "true" ]] && [[ "$target_refs" == *"$ref"* ]]; then
+    if [[ $filter_merged_in_target == "true" ]] && [[ $target_refs == *"$ref"* ]]; then
       continue
     fi
     children+=("$ref")
@@ -405,11 +374,11 @@ _git_format_stack_tree() {
       sorted_children+=("$distance $child")
     done
 
-    IFS=$'\n' sorted_children=($(sort -n <<<"${sorted_children[*]}"))
-    unset IFS
+    local sorted_children_sorted
+    mapfile -t sorted_children_sorted < <(printf "%s\n" "${sorted_children[@]}" | sort -n)
 
     children=()
-    for item in "${sorted_children[@]}"; do
+    for item in "${sorted_children_sorted[@]}"; do
       children+=("${item#* }")
     done
   fi
@@ -457,7 +426,7 @@ _git_format_stack_tree() {
 # ------------------------------------------------------------------------------
 git_rebase_prefix() {
   local all_worktrees=false
-  if [[ "$1" == "--all-worktrees" ]]; then
+  if [[ $1 == "--all-worktrees" ]]; then
     all_worktrees=true
     shift
   fi
@@ -469,24 +438,29 @@ git_rebase_prefix() {
   local start_branch
   start_branch=$(git rev-parse --abbrev-ref HEAD)
 
-  [[ -z "$prefix" ]] && { echo "❌ Error: Missing <prefix>."; return 1; }
+  [[ -z $prefix ]] && {
+    echo "❌ Error: Missing <prefix>."
+    return 1
+  }
 
   if ! _git_update_target "$target"; then
     _git_checkout_if_safe "$start_branch"
     return 1
   fi
 
+  # shellcheck disable=SC2034
   declare -A detached_map
-  if [[ "$all_worktrees" == "true" ]]; then
+  if [[ $all_worktrees == "true" ]]; then
     echo "🔄 Detaching worktrees for cross-worktree rebase..."
     _git_detach_worktrees "$prefix" detached_map
   fi
 
   echo "🔍 Scanning 'refs/heads/${prefix}*'..."
-  local raw_branches=($(git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}*"))
+  local raw_branches
+  mapfile -t raw_branches < <(git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}*")
   local all_branches=()
   for branch in "${raw_branches[@]}"; do
-    if [[ "$branch" != "$target" ]]; then
+    if [[ $branch != "$target" ]]; then
       all_branches+=("$branch")
     fi
   done
@@ -497,9 +471,9 @@ git_rebase_prefix() {
     return 0
   fi
 
-  local unique_tips=($(_git_find_tips "${all_branches[@]}"))
+  local unique_tips
+  mapfile -t unique_tips < <(_git_find_tips "${all_branches[@]}")
   echo "  Found ${#unique_tips[@]} stack tips."
-
 
   # Snapshotting
   # We must map every branch to its hash BEFORE we start rebasing anything.
@@ -552,7 +526,7 @@ git_rebase_prefix() {
     read -r sync_branch sync_old_hash sync_new_hash <<<"$sync_point"
 
     local rebase_ok=false
-    if [[ -n "$sync_branch" ]]; then
+    if [[ -n $sync_branch ]]; then
       echo "    ✨ Detected shared history! Linking onto updated '$sync_branch'..."
       if git rebase --update-refs --onto "$sync_new_hash" "$sync_old_hash" "$branch"; then
         rebase_ok=true
@@ -560,7 +534,7 @@ git_rebase_prefix() {
     else
       local cut_point
       cut_point=$(_git_find_cut_point "$branch" "$target")
-      if [[ -n "$cut_point" ]]; then
+      if [[ -n $cut_point ]]; then
         echo "⚡ Found obsolete ancestor: ${cut_point:0:7}"
         echo "  Dropping it; grafting stack onto $target..."
         if git rebase --update-refs --onto "$target" "$cut_point" "$branch"; then
@@ -575,7 +549,7 @@ git_rebase_prefix() {
     fi
 
     # --- Case 3: Result Logging ---
-    if [[ "$rebase_ok" == true ]]; then
+    if [[ $rebase_ok == true ]]; then
       # For updated stacks, we hide branches that are ALREADY in target (redundant info)
       success_log+=("$(_git_format_stack_tree "$branch" "$prefix" "$target" "true")")
     else
@@ -620,19 +594,20 @@ git_rebase_prefix() {
     # Only delete branches that are NOT also part of a kept/failed stack
     # (This handles shared base branches correctly)
     for cand in "${skipped_branches_flat[@]}"; do
-      if [[ "$kept_str" != *" $cand "* ]]; then
+      if [[ $kept_str != *" $cand "* ]]; then
         branches_to_delete+=("$cand")
       fi
     done
 
     if [[ ${#branches_to_delete[@]} -gt 0 ]]; then
       # Deduplicate list
-      local unique_to_delete=($(printf "%s\n" "${branches_to_delete[@]}" | sort -u))
+      local unique_to_delete
+      mapfile -t unique_to_delete < <(printf "%s\n" "${branches_to_delete[@]}" | sort -u)
 
       echo ""
       echo -n "❓ Delete the ${#unique_to_delete[@]} fully merged local branch(es)? [y/N] "
       read -r reply
-      if [[ "$reply" =~ ^[Yy]$ ]]; then
+      if [[ $reply =~ ^[Yy]$ ]]; then
         echo "🔥 Deleting branches..."
         # Use -D to force delete since we already confirmed they are obsolete/merged via script logic
         git branch -D "${unique_to_delete[@]}"
@@ -646,7 +621,7 @@ git_rebase_prefix() {
     fi
   fi
 
-  if [[ "$all_worktrees" == "true" ]]; then
+  if [[ $all_worktrees == "true" ]]; then
     _git_reattach_worktrees detached_map
   fi
 
@@ -685,7 +660,7 @@ git_evolve() {
   if [ -n "$1" ]; then
     old_hash=$(git rev-parse --verify "$1")
   else
-    if ! old_hash=$(git rev-parse --verify HEAD@{1} 2>/dev/null); then
+    if ! old_hash=$(git rev-parse --verify "HEAD@{1}" 2>/dev/null); then
       echo "❌ Error: Could not find previous HEAD in reflog."
       echo "Usage: git_evolve <OLD_HASH>"
       return 1
@@ -700,6 +675,7 @@ git_evolve() {
 
   echo "🔍 Scanning for stacks displaced by move from ${old_hash:0:7} to ${new_hash:0:7}..."
 
+  # shellcheck disable=SC2034
   declare -A detached_map
   echo "🔄 Detaching worktrees for cross-worktree evolve..."
   _git_detach_worktrees "" detached_map
@@ -709,7 +685,7 @@ git_evolve() {
   candidates=$(git branch --format='%(refname:short)' --contains "$old_hash")
 
   for branch in $candidates; do
-    [[ "$branch" == "$current_branch" ]] && continue
+    [[ $branch == "$current_branch" ]] && continue
     if _git_is_ancestor "$new_hash" "$branch"; then continue; fi
 
     orphans+=("$branch")
@@ -722,7 +698,8 @@ git_evolve() {
   fi
 
   # Filter for Tips only (let --update-refs handle the bodies)
-  local unique_tips=($(_git_find_tips "${orphans[@]}"))
+  local unique_tips
+  mapfile -t unique_tips < <(_git_find_tips "${orphans[@]}")
 
   echo "⚡ Found ${#unique_tips[@]} stack tip(s) (covering ${#orphans[@]} branches):"
   for tip in "${unique_tips[@]}"; do
@@ -739,7 +716,7 @@ git_evolve() {
   local failed_log=()
   local success_count=0
 
-  if [[ "$reply" =~ ^[Yy]$ ]]; then
+  if [[ $reply =~ ^[Yy]$ ]]; then
     for tip in "${unique_tips[@]}"; do
       echo "🔗 Reconnecting stack '$tip'..."
 
@@ -755,7 +732,7 @@ git_evolve() {
       local best_dist=999999
 
       for candidate in "${orphans[@]}"; do
-        [[ "$candidate" == "$tip" ]] && continue
+        [[ $candidate == "$tip" ]] && continue
 
         # 1. Check Ancestry using SNAPSHOT hashes.
         # We must use the old topology to establish relationship, as the candidate
@@ -769,7 +746,7 @@ git_evolve() {
           local candidate_curr_hash
           candidate_curr_hash=$(git rev-parse "$candidate")
 
-          if [[ "$candidate_curr_hash" != "$candidate_initial_hash" ]]; then
+          if [[ $candidate_curr_hash != "$candidate_initial_hash" ]]; then
             # 3. Calculate Distance using INITIAL hashes.
             # We must measure "how close" the ancestor is on the ORIGINAL graph.
             # Comparing Old-Hash vs New-Hash yields invalid distances.
@@ -787,7 +764,7 @@ git_evolve() {
       done
 
       # Execute Rebase
-      if [[ -n "$sync_branch" ]]; then
+      if [[ -n $sync_branch ]]; then
         echo "    ✨ Detected shared history! Linking onto updated '$sync_branch'..."
         # Rebase Range: (Old_Sync_Hash .. Tip] -> Onto New_Sync_Hash
         if git rebase --update-refs --onto "$sync_new_hash" "$sync_old_hash" "$tip"; then
@@ -812,6 +789,9 @@ git_evolve() {
     done
 
     echo -e "\n========================================"
+
+    _git_reattach_worktrees detached_map
+
     if [[ ${#failed_log[@]} -eq 0 ]]; then
       echo "✨ All Done! ($success_count stacks evolved)"
       if [[ "$(git branch --show-current)" != "$current_branch" ]]; then
@@ -833,6 +813,8 @@ git_evolve() {
   else
     echo "❌ Operation cancelled."
   fi
+
+  _git_reattach_worktrees detached_map
 }
 
 # ------------------------------------------------------------------------------
@@ -847,7 +829,7 @@ git_evolve() {
 # Skips branches where local HEAD == origin HEAD.
 # ------------------------------------------------------------------------------
 git_push_prefix() {
-  if [[ "$1" == "--all-worktrees" ]]; then
+  if [[ $1 == "--all-worktrees" ]]; then
     shift
     # Flag is obsolete since push works globally, but we shift it away for backwards compatibility
   fi
@@ -858,7 +840,10 @@ git_push_prefix() {
   shift
   local push_opts=("$@")
 
-  [[ -z "$prefix" ]] && { echo "❌ Error: Missing <prefix>."; return 1; }
+  [[ -z $prefix ]] && {
+    echo "❌ Error: Missing <prefix>."
+    return 1
+  }
 
   echo "🔄 Fetching origin..."
   git fetch origin
@@ -877,9 +862,9 @@ git_push_prefix() {
     remote_hash=$(git rev-parse --verify "refs/remotes/origin/$branch" 2>/dev/null)
 
     # Push if remote is missing OR if hashes differ
-    if [[ -z "$remote_hash" ]]; then
+    if [[ -z $remote_hash ]]; then
       branches_to_push+=("$branch") # New branch
-    elif [[ "$local_hash" != "$remote_hash" ]]; then
+    elif [[ $local_hash != "$remote_hash" ]]; then
       branches_to_push+=("$branch") # Has updates (or needs force push)
     else
       ((++up_to_date_count))
@@ -919,7 +904,7 @@ git_push_prefix() {
 # ------------------------------------------------------------------------------
 git_prune_local_branches() {
   local dry_run=false
-  if [[ "$1" == "-n" ]] || [[ "$1" == "--dry-run" ]]; then
+  if [[ $1 == "-n" ]] || [[ $1 == "--dry-run" ]]; then
     echo "Running git_prune_local_branches in dry-run mode..."
     dry_run=true
   fi
@@ -937,7 +922,7 @@ git_prune_local_branches() {
   orphaned_branches=$(git branch -vv | grep ': gone]' | awk '{if ($1 == "*" || $1 == "+") print $2; else print $1}')
 
   local branches_to_prune=()
-  if [[ -n "$orphaned_branches" ]]; then
+  if [[ -n $orphaned_branches ]]; then
     for branch in $orphaned_branches; do
       if ! echo "$worktree_branches" | grep -Fxq "$branch"; then
         branches_to_prune+=("$branch")
@@ -950,7 +935,7 @@ git_prune_local_branches() {
     return 0
   fi
 
-  if [[ "$dry_run" == "true" ]]; then
+  if [[ $dry_run == "true" ]]; then
     echo "📦 [Dry Run] The following branches would be deleted:"
     printf "    - %s\n" "${branches_to_prune[@]}"
     return 0
@@ -988,7 +973,10 @@ git_prune_remote_prefix() {
     shift
   done
 
-  [[ -z "$prefix" ]] && { echo "❌ Error: Missing <prefix>."; return 1; }
+  [[ -z $prefix ]] && {
+    echo "❌ Error: Missing <prefix>."
+    return 1
+  }
 
   echo "🔄 Fetching origin..."
   git fetch origin
@@ -1002,7 +990,8 @@ git_prune_remote_prefix() {
   echo "🔍 Scanning 'origin/${prefix}*' for obsolete branches..."
 
   # Use for-each-ref for safe parsing
-  local remote_branches=($(git for-each-ref --format='%(refname:short)' "refs/remotes/origin/${prefix}*"))
+  local remote_branches
+  mapfile -t remote_branches < <(git for-each-ref --format='%(refname:short)' "refs/remotes/origin/${prefix}*")
 
   if [[ ${#remote_branches[@]} -eq 0 ]]; then
     echo "    No matching remote branches found."
@@ -1013,8 +1002,8 @@ git_prune_remote_prefix() {
 
   for branch in "${remote_branches[@]}"; do
     # Skip the target itself or HEAD
-    [[ "$branch" == "origin/HEAD" ]] && continue
-    [[ "$branch" == "origin/$target" ]] && continue
+    [[ $branch == "origin/HEAD" ]] && continue
+    [[ $branch == "origin/$target" ]] && continue
 
     # Reuse the logic: Checks for exact ancestry OR patch-ID match (squash merge)
     if _git_is_obsolete "$branch" "origin/$target"; then
@@ -1032,7 +1021,7 @@ git_prune_remote_prefix() {
   echo "🗑️  Found ${#to_delete[@]} obsolete remote branches:"
   printf "    - %s\n" "${to_delete[@]}"
 
-  if [[ "$dry_run" == "true" ]]; then
+  if [[ $dry_run == "true" ]]; then
     echo -e "\n📦 [Dry Run] No changes made."
     return 0
   fi

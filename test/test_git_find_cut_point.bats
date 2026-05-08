@@ -13,8 +13,6 @@ setup() {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
-  local a1_hash
-  a1_hash=$(git rev-parse HEAD)
   commit "a2"
   git checkout main
   commit "a1"

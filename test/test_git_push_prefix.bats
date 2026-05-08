@@ -24,9 +24,10 @@ teardown() {
   run git_push_prefix "feature/"
   assert_success
 
-  local remote_branches=$(git --git-dir=remote.git branch)
-  assert_output --partial "feature/a" <<< "$remote_branches"
-  assert_output --partial "feature/b" <<< "$remote_branches"
+  local remote_branches
+  remote_branches=$(git --git-dir=remote.git branch)
+  assert_output --partial "feature/a" <<<"$remote_branches"
+  assert_output --partial "feature/b" <<<"$remote_branches"
 }
 
 @test "git_push_prefix: skips up-to-date branches" {
@@ -37,7 +38,7 @@ teardown() {
 
   # Mock git push to fail if it's called
   git() {
-    if [[ "$1" == "push" ]]; then
+    if [[ $1 == "push" ]]; then
       echo "git push should not be called" >&2
       return 1 # Fail the test
     else
@@ -61,8 +62,10 @@ teardown() {
   run git_push_prefix "feature/"
   assert_success
 
-  local remote_hash=$(git --git-dir=remote.git rev-parse feature/a)
-  local local_hash=$(git rev-parse feature/a)
+  local remote_hash
+  remote_hash=$(git --git-dir=remote.git rev-parse feature/a)
+  local local_hash
+  local_hash=$(git rev-parse feature/a)
   assert_equal "$remote_hash" "$local_hash"
 }
 

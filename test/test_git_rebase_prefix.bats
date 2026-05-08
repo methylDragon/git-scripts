@@ -73,11 +73,11 @@ teardown() {
 @test "git_rebase_prefix: handles rebase conflicts" {
   # Create a conflict.
   git checkout -b "conflict-branch"
-  echo "conflict" > conflict.txt
+  echo "conflict" >conflict.txt
   git add conflict.txt
   git commit -m "conflict1"
   git checkout main
-  echo "different" > conflict.txt
+  echo "different" >conflict.txt
   git add conflict.txt
   git commit -m "conflict2"
 
@@ -96,4 +96,24 @@ teardown() {
   run git_rebase_prefix "no-match-" "main"
   assert_success
   assert_output --partial "No matching branches found"
+}
+
+@test "git_rebase_prefix: prevents substring corruption when filtering branch names" {
+  # Fix for bug where ${array[@]/$target} would replace substring matches.
+  # If target is "main", and branch is "feature/main-menu", it would corrupt to "feature/-menu".
+
+  git checkout -b "feature/main-menu"
+  commit "menu-1"
+
+  git checkout main
+  commit "main-update-1"
+
+  # Run rebase, it should find "feature/main-menu" and not corrupt it.
+  # We grep for the processing output.
+  run git_rebase_prefix "feature/" "main"
+  assert_success
+
+  # Should show processing of feature/main-menu correctly.
+  assert_output --partial "Processing Stack: feature/main-menu"
+  refute_output --partial "feature/-menu"
 }

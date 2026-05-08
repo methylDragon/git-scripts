@@ -21,7 +21,8 @@ teardown() {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
-  local a1_hash=$(git rev-parse HEAD)
+  local a1_hash
+  a1_hash=$(git rev-parse HEAD)
   git checkout main
   git cherry-pick "$a1_hash"
 
@@ -69,7 +70,8 @@ teardown() {
   commit "initial"
   git checkout -b "feature/a"
   commit "a1"
-  local a1_hash=$(git rev-parse HEAD)
+  local a1_hash
+  a1_hash=$(git rev-parse HEAD)
   git revert "$a1_hash" --no-edit
   git checkout main
   git cherry-pick "$a1_hash"

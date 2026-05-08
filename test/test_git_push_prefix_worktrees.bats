@@ -33,8 +33,9 @@ teardown() {
   assert_success
 
   # Check that both branches were pushed to the remote
-  local remote_branches
-  remote_branches=$(git --git-dir="${BATS_TEST_TMPDIR}/remote.git" branch)
-  assert_output --partial "feature/a" <<< "$remote_branches"
-  assert_output --partial "feature/b" <<< "$remote_branches"
+  run git --git-dir="${BATS_TEST_TMPDIR}/remote.git" branch --format='%(refname:short)'
+  assert_success
+
+  assert_line "feature/a"
+  assert_line "feature/b"
 }

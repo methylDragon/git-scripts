@@ -13,10 +13,10 @@ teardown() {
 
 @test "_git_is_in_another_worktree: safely handles branch names with regex characters" {
   commit "initial"
-  
+
   # Create a branch with regex characters that are valid in git: + . ( ) | $
   local branch_name="feature/regex(a).+|"
-  
+
   git checkout -b "$branch_name"
   commit "regex-commit"
 
@@ -34,10 +34,10 @@ teardown() {
 
 @test "_git_is_in_another_worktree: safely handles .git path overlaps" {
   commit "initial"
-  
+
   local branch_name="feature/test"
   git checkout -b "$branch_name"
-  
+
   git checkout main
 
   # Do NOT add it to a worktree, but name the worktree something that might collide with .git
