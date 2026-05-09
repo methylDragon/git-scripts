@@ -141,6 +141,31 @@ _git_find_tips() {
   printf "%s\n" "${tips[@]}" | sort -u
 }
 
+# Snapshots the current hashes of a list of branches into an associative array.
+#
+# Args:
+#   1: The name of the associative array to populate (passed by reference).
+#   2...: The list of branch names to snapshot.
+_git_snapshot_branches() {
+  local -n _map="$1"
+  shift
+  local branches=("${@}")
+
+  if [[ ${#branches[@]} -eq 0 ]]; then return; fi
+
+  local ref_updates
+  local branches_prefixed=()
+  for r in "${branches[@]}"; do branches_prefixed+=("refs/heads/$r"); done
+
+  mapfile -t ref_updates < <(git for-each-ref --format="%(objectname) %(refname:short)" "${branches_prefixed[@]}")
+
+  for line in "${ref_updates[@]}"; do
+    local ref_hash="${line%% *}"
+    local ref_name="${line#* }"
+    _map["$ref_name"]="$ref_hash"
+  done
+}
+
 # Find the optimal "Cut Point" commit for the purposes of rebasing.
 #
 # Walks backwards from the Tip. The first ancestor we encounter that is
@@ -503,9 +528,7 @@ git_rebase_prefix() {
   # This allows us to calculate topological distance on the "Original Graph"
   # later, even after we have started moving parts of the tree.
   declare -A initial_ref_map
-  for branch in "${all_branches[@]}"; do
-    initial_ref_map["$branch"]=$(git rev-parse "$branch")
-  done
+  _git_snapshot_branches initial_ref_map "${all_branches[@]}"
 
   local success_log=()
   local skipped_log=()
@@ -702,7 +725,6 @@ git_evolve() {
   #
   # This allows us to calculate topological distance on the "Original Graph"
   # later, even after we have started moving parts of the tree.
-  declare -A initial_ref_map
 
   new_hash=$(git rev-parse HEAD)
   current_branch=$(git branch --show-current)
@@ -729,6 +751,9 @@ git_evolve() {
   # Dummy use of map size to satisfy shellcheck until the map actually stores data
   _=${#detached_map[@]}
 
+  declare -A initial_ref_map
+  _=${#initial_ref_map[@]}
+
   echo "🔄 Detaching worktrees for cross-worktree evolve..."
   _git_detach_worktrees "" detached_map
 
@@ -741,8 +766,9 @@ git_evolve() {
     if _git_is_ancestor "$new_hash" "$branch"; then continue; fi
 
     orphans+=("$branch")
-    initial_ref_map["$branch"]=$(git rev-parse "$branch")
   done
+
+  _git_snapshot_branches initial_ref_map "${orphans[@]}"
 
   if [ ${#orphans[@]} -eq 0 ]; then
     echo "✅ No displaced branches found."
@@ -778,42 +804,9 @@ git_evolve() {
       # 'feature-x' moves to a new hash. When we process Stack B, we must detect this movement
       # and graft Stack B onto the NEW 'feature-x' to avoid duplicating commits.
 
-      local sync_branch=""
-      local sync_old_hash=""
-      local sync_new_hash=""
-      local best_dist=999999
-
-      for candidate in "${orphans[@]}"; do
-        [[ $candidate == "$tip" ]] && continue
-
-        # 1. Check Ancestry using SNAPSHOT hashes.
-        # We must use the old topology to establish relationship, as the candidate
-        # might have already moved to the new topology.
-        local candidate_initial_hash="${initial_ref_map[$candidate]}"
-
-        if _git_is_ancestor "$candidate_initial_hash" "$tip"; then
-
-          # 2. Check for Movement.
-          # Has this ancestor been rebased by a previous iteration of this loop?
-          local candidate_curr_hash
-          candidate_curr_hash=$(git rev-parse "$candidate")
-
-          if [[ $candidate_curr_hash != "$candidate_initial_hash" ]]; then
-            # 3. Calculate Distance using INITIAL hashes.
-            # We must measure "how close" the ancestor is on the ORIGINAL graph.
-            # Comparing Old-Hash vs New-Hash yields invalid distances.
-            local dist
-            dist=$(git rev-list --count "$candidate_initial_hash..$tip")
-
-            if ((dist < best_dist)); then
-              best_dist=$dist
-              sync_branch="$candidate"
-              sync_old_hash="$candidate_initial_hash"
-              sync_new_hash="$candidate_curr_hash"
-            fi
-          fi
-        fi
-      done
+      local sync_point
+      sync_point=$(_git_find_sync_point "$tip" orphans initial_ref_map)
+      read -r sync_branch sync_old_hash sync_new_hash <<<"$sync_point"
 
       # Execute Rebase
       if [[ -n $sync_branch ]]; then
@@ -842,14 +835,9 @@ git_evolve() {
 
     echo -e "\n========================================"
 
-    _git_reattach_worktrees detached_map
-
+    local exit_code=0
     if [[ ${#failed_log[@]} -eq 0 ]]; then
       echo "✨ All Done! ($success_count stacks evolved)"
-      if [[ "$(git branch --show-current)" != "$current_branch" ]]; then
-        _git_checkout_if_safe "$current_branch"
-      fi
-      return 0
     else
       echo "⚠️  SUMMARY: $success_count succeeded, ${#failed_log[@]} failed."
       echo "    The repository has been reset to clean state (per stack)."
@@ -857,16 +845,19 @@ git_evolve() {
       for entry in "${failed_log[@]}"; do
         echo "  - $entry"
       done | sed 's/^/  /'
-      if [[ "$(git branch --show-current)" != "$current_branch" ]]; then
-        _git_checkout_if_safe "$current_branch"
-      fi
-      return 1
+      exit_code=1
     fi
   else
     echo "❌ Operation cancelled."
   fi
 
   _git_reattach_worktrees detached_map
+
+  if [[ "$(git branch --show-current)" != "$current_branch" ]]; then
+    _git_checkout_if_safe "$current_branch"
+  fi
+
+  return ${exit_code:-0}
 }
 
 # ------------------------------------------------------------------------------
@@ -905,13 +896,18 @@ git_push_prefix() {
   local branches_to_push=()
   local up_to_date_count=0
 
+  # Pre-fetch all remote hashes for O(1) bash associative array lookup
+  declare -A remote_hashes
+  while read -r remote_hash ref_name; do
+    # Strip 'refs/remotes/origin/' to get the branch name
+    local branch_name="${ref_name#refs/remotes/origin/}"
+    remote_hashes["$branch_name"]="$remote_hash"
+  done < <(git for-each-ref --format='%(objectname) %(refname)' "refs/remotes/origin/${prefix}*")
+
   # Iterate over local branches with their hash
   # Format: branch_name commit_hash
   while read -r branch local_hash; do
-    # Resolve the hash of the remote tracking branch (from local cache)
-    # We suppress errors because the remote branch might not exist yet (new branch).
-    local remote_hash
-    remote_hash=$(git rev-parse --verify "refs/remotes/origin/$branch" 2>/dev/null)
+    local remote_hash="${remote_hashes["$branch"]:-}"
 
     # Push if remote is missing OR if hashes differ
     if [[ -z $remote_hash ]]; then
