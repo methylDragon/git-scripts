@@ -117,3 +117,49 @@ teardown() {
   assert_output --partial "Processing Stack: feature/main-menu"
   refute_output --partial "feature/-menu"
 }
+
+@test "git_rebase_prefix: intermediate branches incorporated into main are caught for deletion" {
+  # Layout:
+  #   main -> feature/a -> feature/a-b
+  #
+  # We simulate `feature/a` being merged into `main` directly (fast-forward).
+  # We then batch rebase the `feature/` prefix. Since `feature/a` is now entirely
+  # redundant, we expect `git_rebase_prefix` to prompt for its deletion.
+  # The `--auto-delete` flag automatically says "yes" to this prompt.
+  # Finally, `feature/a-b` should be retained and rebased dynamically onto `main`.
+
+  git checkout -b "feature/a"
+  echo "a" >a.txt
+  git add a.txt
+  git commit -m "commit a"
+
+  git checkout -b "feature/a-b"
+  echo "b" >b.txt
+  git add b.txt
+  git commit -m "commit b"
+
+  # Fast-forward main to feature/a
+  git checkout main
+  git merge feature/a
+
+  # Ensure the branches are still there initially
+  assert_local_branch_exists "feature/a"
+  assert_local_branch_exists "feature/a-b"
+
+  run git_rebase_prefix --auto-delete "feature/" "main"
+
+  assert_success
+
+  # The output should show the prompt for deletion
+  assert_output --partial "❓ Delete the 1 fully merged local branch"
+  assert_output --partial "🔥 Deleting branches"
+
+  # `feature/a` should be deleted
+  assert_local_branch_is_missing "feature/a"
+
+  # `feature/a-b` should be retained, since it wasn't merged into main
+  assert_local_branch_exists "feature/a-b"
+
+  # `feature/a-b` should be rebased directly onto `main`
+  assert_branch_is_immediate_parent_of "main" "feature/a-b"
+}

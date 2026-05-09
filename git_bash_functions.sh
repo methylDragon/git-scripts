@@ -419,16 +419,41 @@ _git_format_stack_tree() {
 #     for the entire stack (A, B, and C) is aborted and reverted to the original state.
 #   - Summary: Records successes and failures per stack and prints a summary at the end.
 #
+# Arguments:
+#   <prefix>          The branch prefix to search for (e.g., "feature/").
+#   [target_branch]   The branch to rebase the stacks onto (defaults to "main").
+#
+# Options:
+#   --all-worktrees   Locates branches checked out in other local worktrees, automatically
+#                     detaches them safely, rebases them, and then reattaches the worktrees
+#                     to the updated branch pointers.
+#   --auto-delete     Automatically bypasses the interactive '[y/N]' prompt and deletes fully
+#                     merged/obsolete branches. Useful for CI or headless batch testing.
+#
 # Usage:
 #   git_rebase_prefix <prefix> [target_branch]
 #   git_rebase_prefix --all-worktrees <prefix> [target_branch]
+#   git_rebase_prefix --auto-delete <prefix> [target_branch]
 # ------------------------------------------------------------------------------
 git_rebase_prefix() {
   local all_worktrees=false
-  if [[ $1 == "--all-worktrees" ]]; then
-    all_worktrees=true
-    shift
-  fi
+  local auto_delete=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --all-worktrees)
+      all_worktrees=true
+      shift
+      ;;
+    --auto-delete)
+      auto_delete=true
+      shift
+      ;;
+    *)
+      break
+      ;;
+    esac
+  done
 
   _git_check_version || return 1
 
@@ -485,8 +510,8 @@ git_rebase_prefix() {
   local success_log=()
   local skipped_log=()
   local failed_log=()
-  local skipped_branches_flat=()
-  local kept_branches_flat=()
+  local -A branches_to_delete_map=()
+  local -A branches_to_keep_map=()
 
   for branch in "${unique_tips[@]}"; do
     echo -e "\n----------------------------------------"
@@ -504,15 +529,11 @@ git_rebase_prefix() {
 
       # Collect these branches as candidates for deletion
       for ref in $stack_refs; do
-        skipped_branches_flat+=("$ref")
+        echo "    🗑️  Branch '$ref' is fully merged into $target"
+        branches_to_delete_map["$ref"]=1
       done
       continue
     fi
-
-    # If not skipped, we are attempting to keep these branches (either updated or failed)
-    for ref in $stack_refs; do
-      kept_branches_flat+=("$ref")
-    done
 
     # --- Case 2: Rebase ---
     # If a stack forks, and we rebase one of the forks, the common history
@@ -546,8 +567,40 @@ git_rebase_prefix() {
       fi
     fi
 
-    # --- Case 3: Result Logging ---
+    # --- Case 3: Result Logging & Obsolete Detection ---
     if [[ $rebase_ok == true ]]; then
+      # Post-rebase check: Identify intermediate branches that are now effectively fully merged.
+      # We extract the current hashes of all branches in the stack in one rapid command.
+      local current_target_hash
+      current_target_hash=$(git rev-parse "$target")
+
+      # Use `git show-ref` to efficiently grab hashes in bulk. Format: `hash ref`
+      local ref_updates
+      local stack_refs_prefixed=()
+      for r in $stack_refs; do stack_refs_prefixed+=("refs/heads/$r"); done
+
+      if [[ ${#stack_refs_prefixed[@]} -gt 0 ]]; then
+        mapfile -t ref_updates < <(git for-each-ref --format="%(objectname) %(refname:short)" "${stack_refs_prefixed[@]}")
+      fi
+
+      for line in "${ref_updates[@]}"; do
+        local ref_name="${line#* }"
+
+        # We enforce it specifically with an explicit git rev-parse lookup to guarantee it maps precisely
+        # in environments where git for-each-ref might not reflect mid-process updates instantly.
+        local actual_hash
+        actual_hash=$(git rev-parse "$ref_name")
+
+        if [[ $actual_hash == "$current_target_hash" ]]; then
+          branches_to_delete_map["$ref_name"]=1
+          # Un-keep it if it was previously kept by another fork
+          unset "branches_to_keep_map[$ref_name]"
+        else
+          # Ensure branches that survived the rebase are captured so they aren't deleted
+          branches_to_keep_map["$ref_name"]=1
+        fi
+      done
+
       # For updated stacks, we hide branches that are ALREADY in target (redundant info)
       success_log+=("$(_git_format_stack_tree "$branch" "$prefix" "$target" "true")")
     else
@@ -585,31 +638,34 @@ git_rebase_prefix() {
   fi
 
   # --- Cleanup Prompt ---
-  if [[ ${#skipped_branches_flat[@]} -gt 0 ]]; then
-    local branches_to_delete=()
-    local kept_str=" ${kept_branches_flat[*]} "
+  local unique_to_delete=()
+  for cand in "${!branches_to_delete_map[@]}"; do
+    if [[ -z ${branches_to_keep_map["$cand"]:-} ]]; then
+      unique_to_delete+=("$cand")
+    fi
+  done
 
-    # Only delete branches that are NOT also part of a kept/failed stack
-    # (This handles shared base branches correctly)
-    for cand in "${skipped_branches_flat[@]}"; do
-      if [[ $kept_str != *" $cand "* ]]; then
-        branches_to_delete+=("$cand")
+  if [[ ${#unique_to_delete[@]} -gt 0 ]]; then
+    # Sort for deterministic display
+    local unique_to_delete_sorted
+    mapfile -t unique_to_delete_sorted < <(printf "%s\n" "${unique_to_delete[@]}" | sort -u)
+
+    echo ""
+    echo -n "❓ Delete the ${#unique_to_delete_sorted[@]} fully merged local branch(es)? [y/N] "
+
+    if [[ $auto_delete == "true" ]]; then
+      echo "y"
+      reply="y"
+    else
+      if ! read -r reply; then
+        reply="n"
       fi
-    done
+    fi
 
-    if [[ ${#branches_to_delete[@]} -gt 0 ]]; then
-      # Deduplicate list
-      local unique_to_delete
-      mapfile -t unique_to_delete < <(printf "%s\n" "${branches_to_delete[@]}" | sort -u)
-
-      echo ""
-      echo -n "❓ Delete the ${#unique_to_delete[@]} fully merged local branch(es)? [y/N] "
-      read -r reply
-      if [[ $reply =~ ^[Yy]$ ]]; then
-        echo "🔥 Deleting branches..."
-        # Use -D to force delete since we already confirmed they are obsolete/merged via script logic
-        git branch -D "${unique_to_delete[@]}"
-      fi
+    if [[ $reply =~ ^[Yy]$ ]]; then
+      echo "🔥 Deleting branches..."
+      # Use -D to force delete since we already confirmed they are obsolete/merged via script logic
+      git branch -D "${unique_to_delete_sorted[@]}"
     fi
   fi
 
@@ -617,10 +673,6 @@ git_rebase_prefix() {
     if ! _git_is_in_another_worktree "$start_branch"; then
       git checkout "$start_branch" 2>/dev/null
     fi
-  fi
-
-  if [[ $all_worktrees == "true" ]]; then
-    _git_reattach_worktrees detached_map
   fi
 
   _git_reattach_worktrees detached_map
