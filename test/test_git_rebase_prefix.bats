@@ -118,6 +118,43 @@ teardown() {
   refute_output --partial "feature/-menu"
 }
 
+@test "git_rebase_prefix: preserves internal merge commits within the stack" {
+  # main -> feature/a -> feature/b (merge commit from some-other-branch)
+  # When rebasing onto advanced main, the merge commit structure in feature/b should be preserved.
+
+  git checkout -b some-other-branch
+  commit "some-other"
+
+  git checkout main
+  git checkout -b feature/a
+  commit "a"
+
+  git checkout -b feature/b
+  commit "b"
+  git merge --no-ff some-other-branch -m "Merge some-other-branch into feature/b"
+
+  local original_b_parents
+  original_b_parents=$(git log -1 --format="%P" feature/b | wc -w)
+  assert_equal "$original_b_parents" 2
+
+  git checkout main
+  commit "main advance"
+
+  run git_rebase_prefix --auto-delete "feature/" "main"
+  assert_success
+
+  # Verify feature/b is still a merge commit (has 2 parents)
+  local new_b_parents
+  new_b_parents=$(git log -1 --format="%P" feature/b | wc -w)
+  assert_equal "$new_b_parents" 2
+
+  # Verify it is rebased onto new main
+  run _git_is_ancestor "main" "feature/a"
+  assert_success
+  run _git_is_ancestor "feature/a" "feature/b"
+  assert_success
+}
+
 @test "git_rebase_prefix: intermediate branches incorporated into main are caught for deletion" {
   # Layout:
   #   main -> feature/a -> feature/a-b

@@ -570,7 +570,7 @@ git_rebase_prefix() {
     local rebase_ok=false
     if [[ -n $sync_branch ]]; then
       echo "    ✨ Detected shared history! Linking onto updated '$sync_branch'..."
-      if git rebase --update-refs --onto "$sync_new_hash" "$sync_old_hash" "$branch"; then
+      if git rebase --update-refs --rebase-merges --onto "$sync_new_hash" "$sync_old_hash" "$branch"; then
         rebase_ok=true
       fi
     else
@@ -579,12 +579,12 @@ git_rebase_prefix() {
       if [[ -n $cut_point ]]; then
         echo "⚡ Found obsolete ancestor: ${cut_point:0:7}"
         echo "  Dropping it; grafting stack onto $target..."
-        if git rebase --update-refs --onto "$target" "$cut_point" "$branch"; then
+        if git rebase --update-refs --rebase-merges --onto "$target" "$cut_point" "$branch"; then
           rebase_ok=true
         fi
       else
         echo "  Standard rebase onto $target..."
-        if git rebase --update-refs "$target" "$branch"; then
+        if git rebase --update-refs --rebase-merges "$target" "$branch"; then
           rebase_ok=true
         fi
       fi
@@ -812,7 +812,7 @@ git_evolve() {
       if [[ -n $sync_branch ]]; then
         echo "    ✨ Detected shared history! Linking onto updated '$sync_branch'..."
         # Rebase Range: (Old_Sync_Hash .. Tip] -> Onto New_Sync_Hash
-        if git rebase --update-refs --onto "$sync_new_hash" "$sync_old_hash" "$tip"; then
+        if git rebase --update-refs --rebase-merges --onto "$sync_new_hash" "$sync_old_hash" "$tip"; then
           echo "    ✅ Success."
           ((++success_count))
         else
@@ -822,7 +822,7 @@ git_evolve() {
         fi
       else
         # Standard Rebase: (Old_Base .. Tip] -> Onto New_Base
-        if git rebase --update-refs --onto "$new_hash" "$old_hash" "$tip"; then
+        if git rebase --update-refs --rebase-merges --onto "$new_hash" "$old_hash" "$tip"; then
           echo "    ✅ Success."
           ((++success_count))
         else
