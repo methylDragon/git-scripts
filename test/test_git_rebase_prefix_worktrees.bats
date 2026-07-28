@@ -158,3 +158,31 @@ teardown() {
     assert_equal "$current_branch" ""
   )
 }
+
+@test "git_rebase_prefix: skips stack if a branch is in another worktree and --all-worktrees is omitted" {
+  git checkout -b "feature/skip_tip"
+  commit "skip_tip_1"
+
+  git checkout -b "feature/skip_child"
+  commit "skip_child_1"
+
+  git checkout main
+  commit "main_update"
+
+  # Add parent branch to a worktree
+  git worktree add "${BATS_TEST_TMPDIR}/wt-skip" "feature/skip_tip"
+
+  run git_rebase_prefix "feature/" "main"
+  assert_failure
+
+  # It should warn about skip_tip
+  assert_output --partial "Warning: Branch 'feature/skip_tip' in stack is checked out in another worktree."
+  assert_output --partial "Skipping stack. (Use --all-worktrees to automatically rebase across worktrees)"
+
+  # Neither should be rebased onto the new main commit
+  # The parent branch should not have the main_update commit in its history
+  run git merge-base main feature/skip_tip
+  local initial_commit
+  initial_commit=$(git rev-parse HEAD~1) # initial commit is HEAD~1 of main
+  assert_output "$initial_commit"
+}

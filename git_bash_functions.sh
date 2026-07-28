@@ -544,6 +544,26 @@ git_rebase_prefix() {
     local stack_refs
     stack_refs=$(git branch --format='%(refname:short)' --list "${prefix}*" --merged "$branch")
 
+    # --- Case 0: Skipped (Checked out in another worktree) ---
+    if [[ $all_worktrees != "true" ]]; then
+      local in_worktree=false
+      local blocking_branch=""
+      for ref in $stack_refs; do
+        if _git_is_in_another_worktree "$ref"; then
+          in_worktree=true
+          blocking_branch="$ref"
+          break
+        fi
+      done
+
+      if [[ $in_worktree == true ]]; then
+        echo "⚠️  Warning: Branch '$blocking_branch' in stack is checked out in another worktree."
+        echo "  Skipping stack. (Use --all-worktrees to automatically rebase across worktrees)"
+        failed_log+=("$(_git_format_stack_tree "$branch" "$prefix" "$target" "false")")
+        continue
+      fi
+    fi
+
     # --- Case 1: Skipped (Fully Merged) ---
     if _git_is_obsolete "$branch" "$target"; then
       echo "💤 Fully merged. Skipping."
