@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-scripts"
+version = "0.1.0"
+dependencies = [
+    "pygit2",
+    "rich",
+    "questionary",
+]
+
+[project.scripts]
+git-rebase-prefix = "git_scripts.cli:main"
+git-push-prefix = "git_scripts.cli:main"

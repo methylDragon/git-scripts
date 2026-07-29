@@ -1,80 +1,89 @@
 # Git Stack Utilities
 
 [![CI](https://github.com/methylDragon/git-scripts/actions/workflows/main.yml/badge.svg)](https://github.com/methylDragon/git-scripts/actions/workflows/main.yml)
+[![Coverage Status](https://coveralls.io/repos/github/methylDragon/git-scripts/badge.svg?branch=main)](https://coveralls.io/github/methylDragon/git-scripts?branch=main)
 
 A collection of scripts to wrangle branches, especially in a [stacked-diff](https://newsletter.pragmaticengineer.com/p/stacked-diffs) context in repos where the main branch keeps updating.
 
 These scripts handle "obsolete" commits, merged commits, and branching histories relatively intelligently. Stack structure and branching are preserved, and any rebase issues are flagged and gracefully aborted for that stack.
 
-**Requirements:** Git 2.38+ (relies on `rebase --update-refs`).
-
 ## Setup
 
-1.  Download the script to your home directory:
+1. **Install:** Run the automated installer, which clones the repo. *(It will automatically install [`pixi`](https://pixi.sh/) if you don't already have it.)*
 
     ```bash
-    curl -o ~/.git_bash_functions.sh https://raw.githubusercontent.com/methylDragon/git-scripts/main/git_bash_functions.sh
+    curl -sSL https://raw.githubusercontent.com/methylDragon/git-scripts/main/install.sh | bash
     ```
 
-2.  Add the following line to your `.bashrc` or `.zshrc` file:
+   **Note: Local Installation**
 
-    ```bash
-    source ~/.git_bash_functions.sh
-    ```
+   If you have a local clone of this repository and want to install from it (useful for development), you can run this instead:
 
-3.  Restart your shell or run `source ~/.git_bash_functions.sh`.
+   ```bash
+   ./install.sh --local
+   ```
 
-To update the script, simply run the `curl` command from step 1 again.
+This sets up the environment and creates symlinks to `~/.local/bin` directly from your local clone.
+
+1. **Verify:** Ensure `~/.local/bin` is in your system's `$PATH`.
+
+The installer creates native Git subcommands! Because the executables are prefixed with `git-` and placed in your `PATH`, Git automatically recognizes them.
+
+To update the scripts later, simply run:
+
+```bash
+git-scripts-update
+```
 
 ## Usage
 
-| Function | Description |
+You can invoke these scripts just like native Git commands:
+
+| Command | Description |
 | :--- | :--- |
-| **`git_rebase_prefix <prefix> [base]`** | **Batch Update.** Rebases all stacks matching `prefix` onto `base` (default: `main`). Preserves topology; skips commits already squashed upstream. |
-| **`git_evolve`** | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. |
-| **`git_push_prefix <prefix> [opts]`** | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git. |
-| **`git_prune_remote_prefix <prefix>`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `main`. |
-| **`git_prune_local_branches`** | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone. |
+| **`git rebase-prefix <prefix> [target] [--all-worktrees] [--auto-delete] [--obsolete-search-depth <int>]`** | **Batch Update.** Rebases all stacks matching `prefix` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream. |
+| **`git evolve [old_hash]`** | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted. |
+| **`git push-prefix <prefix> [opts]`** | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git. |
+| **`git prune-remote-prefix <prefix> [target] [-n/--dry-run] [--obsolete-search-depth <int>]`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `target` (default: `main`). |
+| **`git prune-local-branches [-n/--dry-run]`** | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone. |
+
+> **Note:** All commands support `--plain` (disables rich UI formatting) and `-y/--yes` (bypasses confirmation prompts).
+
+### Working with Worktrees
+
+If you heavily utilize `git worktree` for stacked PRs, you might run into Git lock errors when trying to update a branch that is currently checked out in another worktree.
+
+The `git rebase-prefix` command accepts an `--all-worktrees` flag, while `git evolve` handles worktrees **automatically**. When active, the tool detects if any branches in your stack are checked out in other worktrees. It safely detaches those worktrees, performs the complex topology rebases, and then cleanly re-checks out the updated branches in their original worktrees.
 
 ## Testing
 
-This repository uses [BATS](https://github.com/bats-core/bats-core) (Bash Automated Testing System) to ensure correctness.
+This repository uses `pytest` for unit testing the Python logic and `absltest` for parameterization. We also use `pytest-xdist` to speed up tests by running them in parallel.
 
 1. **Install dependencies:**
-   Ensure you have Node.js/npm installed.
-   ```bash
-   npm install
-   ```
+   `pixi install` will automatically handle all required dependencies.
 
-2. **Run tests:**
-   ```bash
-   npx bats test/
-   ```
+1. **Run tests:**
 
-3. **Run tests in parallel (Faster):**
-   If you have GNU Parallel installed, you can dramatically speed up the test suite:
    ```bash
-   npx bats -j $(nproc) test/
+   pixi run test
    ```
-   *(e.g., `-j 8` or `-j 16` depending on your CPU cores)*
 
 ## Development
 
-If you'd like to contribute to this project, we enforce bash formatting (`shfmt`) and linting (`shellcheck`) using the `pre-commit` framework.
+If you'd like to contribute to this project, we enforce formatting (`ruff-format`) and linting (`ruff`) for Python files, as well as `markdownlint` and shell linting/formatting via `pre-commit`.
 
-1. **Install dependencies:** Ensure you have Python/pip installed, then install the pre-commit CLI:
+1. **Install dependencies & hooks:**
+   Everything is managed via `pixi`. Remember to run `pixi install` if you cloned this repository.
+
    ```bash
-   # One of these
-   pip install pre-commit
-   sudo apt install pre-commit
+   pixi run setup
    ```
-2. **Install the git hook:**
-   ```bash
-   pre-commit install
-   ```
+
    Now, every time you commit, it will automatically check your scripts.
-3. **Run manually:**
+
+1. **Run manually:**
    You can trigger formatting and linting across all files without committing by running:
+
    ```bash
-   pre-commit run --all-files
+   pixi run pre-commit
    ```

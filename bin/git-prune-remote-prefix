@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -e
+SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" &>/dev/null && pwd)
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+exec "$PROJECT_ROOT/.pixi/envs/default/bin/python" -u -m git_scripts.cli prune-remote "$@"

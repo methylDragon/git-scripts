@@ -13,5 +13,14 @@ jobs:
     - uses: actions/checkout@v3
       with:
         submodules: 'true'
-    - name: Run tests
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.8.1
+      with:
+        pixi-version: v0.39.0
+        cache: true
+    - name: Run Bash tests (Legacy)
       run: ./test/deps/bats-core/bin/bats test
+    - name: Run Python tests (New)
+      run: pixi run pytest tests/
+    - name: Lint (Ruff)
+      run: pixi run ruff check src/ tests/

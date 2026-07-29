@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -e
+echo "Updating git-scripts..."
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" &>/dev/null && pwd)
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+cd "$PROJECT_ROOT"
+git pull origin main
+
+echo "Rebuilding environment..."
+pixi install
+
+echo "Updating symlinks in ~/.local/bin..."
+mkdir -p ~/.local/bin
+for script in bin/git-*; do
+  ln -sf "$PROJECT_ROOT/$script" ~/.local/bin/"$(basename "$script")"
+done
+
+echo "✅  git-scripts updated successfully!"
