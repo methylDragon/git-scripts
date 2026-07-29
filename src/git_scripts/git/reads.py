@@ -12,42 +12,37 @@ def get_repo(path: str = ".") -> pygit2.Repository:
     return pygit2.Repository(pygit2.discover_repository(path))
 
 
-def _get_patch_id(
-    repo: pygit2.Repository, commit: pygit2.Commit
-) -> Optional[pygit2.Oid]:
-    """Calculates the patch ID for a single commit."""
-    if not commit.parents:
-        tree = commit.tree
-        # Diff empty tree against commit tree
-        diff = tree.diff_to_tree()
-    else:
-        diff = repo.diff(commit.parents[0].tree, commit.tree)
-    return diff.patchid
+def _check_squash_merge(
+    repo_path: str,
+    commit_hash: str,
+    target_ref: str,
+    target_tree: Optional[str] = None,
+) -> bool:
+    """Returns True if commit_hash is squash-merged into target_ref."""
+    if target_tree is None:
+        try:
+            target_tree = subprocess.run(
+                ["git", "rev-parse", f"{target_ref}^{{tree}}"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except subprocess.CalledProcessError:
+            return False
 
+    try:
+        merge_tree = subprocess.run(
+            ["git", "merge-tree", "--write-tree", target_ref, commit_hash],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
 
-@lru_cache(maxsize=128)
-def _get_target_history_data(
-    repo_path: str, target_commit_id: str, search_depth: int
-) -> Tuple[Set[pygit2.Oid], Set[pygit2.Oid]]:
-    """Caches target history tree IDs and patch IDs."""
-    repo = pygit2.Repository(repo_path)
-    target_commit = repo.get(target_commit_id)
-
-    walker = repo.walk(target_commit.id, pygit2.GIT_SORT_TOPOLOGICAL)
-    walker.simplify_first_parent()
-
-    tree_ids = set()
-    patch_ids = set()
-
-    for i, c in enumerate(walker):
-        if i > search_depth:
-            break
-        tree_ids.add(c.tree.id)
-        pid = _get_patch_id(repo, c)
-        if pid:
-            patch_ids.add(pid)
-
-    return tree_ids, patch_ids
+        return merge_tree == target_tree
+    except subprocess.CalledProcessError:
+        return False
 
 
 @lru_cache(maxsize=1024)
@@ -73,27 +68,8 @@ def _is_obsolete_cached(
     except subprocess.CalledProcessError:
         pass
 
-    try:
-        target_tree = subprocess.run(
-            ["git", "rev-parse", f"{target_ref}^{{tree}}"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-        merge_tree = subprocess.run(
-            ["git", "merge-tree", "--write-tree", target_ref, commit_hash],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-
-        if merge_tree == target_tree:
-            return True
-    except subprocess.CalledProcessError:
-        pass
+    if _check_squash_merge(repo_path, commit_hash, target_ref):
+        return True
 
     # Strategy 3: Tree Hash Match in History
     try:
@@ -233,19 +209,8 @@ def find_cut_point(
                 except subprocess.CalledProcessError:
                     return None
 
-            try:
-                merge_tree = subprocess.run(
-                    ["git", "merge-tree", "--write-tree", target_ref, sha],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                ).stdout.strip()
-
-                if merge_tree == target_tree:
-                    return sha
-            except subprocess.CalledProcessError:
-                pass
+            if _check_squash_merge(repo_path, sha, target_ref, target_tree):
+                return sha
 
     return None
 

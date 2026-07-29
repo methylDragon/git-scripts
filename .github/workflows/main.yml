@@ -18,7 +18,5 @@ jobs:
       with:
         pixi-version: v0.39.0
         cache: true
-    - name: Lint (Ruff)
-      run: pixi run ruff check src/ tests/
     - name: Run Python tests
-      run: pixi run pytest tests/
+      run: pixi run test

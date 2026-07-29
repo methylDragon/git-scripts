@@ -66,11 +66,12 @@ class TestTopologyAnalyzer(absltest.TestCase):
         self.repo_helper.commit("init", "init.txt", "init")
 
         self.repo_helper.checkout("feat", create=True)
-        self.repo_helper.commit("feat", "feat.txt", "feat")
+        self.repo_helper.commit("feat on branch", "feat.txt", "feat")
 
         # Merge feat into main identically (simulating squash/fast-forward)
+        # Message differs to prevent timestamp-based hash collisions
         self.repo_helper.checkout("main")
-        self.repo_helper.commit("feat", "feat.txt", "feat")
+        self.repo_helper.commit("feat on main", "feat.txt", "feat")
 
         analyzer = TopologyAnalyzer(self.repo_helper.path, ["feat"])
         analyzer.precompute_obsolescence("main")

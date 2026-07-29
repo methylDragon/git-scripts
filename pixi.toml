@@ -28,6 +28,7 @@ pytest-xdist = ">=3.8.0,<4"
 pre-commit = ">=4.6.1,<5"
 typer = ">=0.27.0,<0.28"
 filelock = ">=3.16.1,<4"
+act = ">=0.2.89,<0.3"
 
 [pypi-dependencies]
 git-scripts = { path = ".", editable = true }

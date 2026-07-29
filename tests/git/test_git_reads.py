@@ -91,8 +91,8 @@ class TestGitReads(absltest.TestCase):
         # Merge feat/1 into main
         self.repo_helper.checkout("main")
         self.repo_helper.commit(
-            "1", "1.txt", "1"
-        )  # Identical content (patch match)
+            "1 on main", "1.txt", "1"
+        )  # Identical content (patch match); diff msg avoids collision
 
         cut_point = find_cut_point(
             self.repo, str(self.repo.revparse_single("feat/2").id), "main"
