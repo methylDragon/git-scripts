@@ -1,66 +1,16 @@
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
 # Environment
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDE / Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Testing / Linting
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.pylint.d/
-
-# pixi environments
 .pixi/*
 !.pixi/config.toml
 
-# Node
-node_modules/
-package-lock.json
+# IDE / Editors
+.vscode/
 
-# Tool specific
-manual_out.txt
-plans/
+# Testing / Linting
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

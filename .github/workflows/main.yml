@@ -18,9 +18,7 @@ jobs:
       with:
         pixi-version: v0.39.0
         cache: true
-    - name: Run Bash tests (Legacy)
-      run: ./test/deps/bats-core/bin/bats test
-    - name: Run Python tests (New)
-      run: pixi run pytest tests/
     - name: Lint (Ruff)
       run: pixi run ruff check src/ tests/
+    - name: Run Python tests
+      run: pixi run pytest tests/
