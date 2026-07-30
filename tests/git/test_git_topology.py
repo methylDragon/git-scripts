@@ -1,8 +1,14 @@
 """Tests for the TopologyAnalyzer."""
 
+from unittest.mock import MagicMock, patch
+
 from absl.testing import absltest
 
-from git_scripts.git.topology import TopologyAnalyzer
+from git_scripts.git.topology import (
+    TopologyAnalyzer,
+    find_linear_stack,
+    sort_branches_bottom_to_top,
+)
 from tests.helpers import GitTestRepo
 
 
@@ -79,6 +85,28 @@ class TestTopologyAnalyzer(absltest.TestCase):
         analysis = analyzer.get_analysis("feat")
         self.assertTrue(analysis.is_obsolete)
         self.assertIsNone(analysis.cut_point)
+
+    def test_find_linear_stack(self):
+        """Tests finding a linear stack."""
+        repo = MagicMock()
+        with patch(
+            "git_scripts.git.topology.get_parent_branch",
+            side_effect=["b1", "b2", None],
+        ):
+            self.assertEqual(
+                find_linear_stack(repo, "start", {"b1", "b2", "start"}),
+                {"start", "b1", "b2"},
+            )
+
+    def test_sort_branches_bottom_to_top(self):
+        """Tests sorting branches."""
+        parent_map: dict[str, str | None] = {
+            "b1": "main",
+            "b2": "b1",
+            "b3": "b2",
+        }
+        ordered = sort_branches_bottom_to_top({"b1", "b2", "b3"}, parent_map)
+        self.assertEqual(ordered, ["b1", "b2", "b3"])
 
 
 if __name__ == "__main__":

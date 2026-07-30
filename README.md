@@ -11,9 +11,9 @@ These scripts handle "obsolete" commits, merged commits, and branching histories
 
 1. **Install:** Run the automated installer, which clones the repo. *(It will automatically install [`pixi`](https://pixi.sh/) if you don't already have it.)*
 
-    ```bash
-    curl -sSL https://raw.githubusercontent.com/methylDragon/git-scripts/main/install.sh | bash
-    ```
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/methylDragon/git-scripts/main/install.sh | bash
+   ```
 
    **Note: Local Installation**
 
@@ -39,15 +39,27 @@ git-scripts-update
 
 You can invoke these scripts just like native Git commands:
 
-| Command | Description |
-| :--- | :--- |
-| **`git rebase-prefix <prefix> [target] [--all-worktrees] [--auto-delete]`** | **Batch Update.** Rebases all stacks matching `prefix` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream. |
-| **`git evolve [old_hash]`** | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted. |
-| **`git push-prefix <prefix> [opts]`** | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git. |
+### Standard Git Utilities
+
+| Command                                                                           | Description                                                                                                                                                                                     |
+| :-------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`git rebase-prefix <prefix> [target] [--all-worktrees] [--auto-delete]`**       | **Batch Update.** Rebases all stacks matching `prefix` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream.                                            |
+| **`git evolve [old_hash]`**                                                       | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted.                       |
+| **`git push-prefix <prefix> [opts]`**                                             | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git.                                                                                   |
+| **`git push-stack [opts]`**                                                       | **Stack Push.** Pushes all out-of-sync branches in the current topological stack (from trunk up to current branch). Passes extra args to git.                                                   |
 | **`git prune-remote-prefix <prefix> [target] [-n/--dry-run] [--prune-no-local]`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `target` (default: `main`). Use `--prune-no-local` to also delete branches lacking a local counterpart. |
-| **`git prune-local-branches [-n/--dry-run]`** | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone. |
+| **`git prune-local-branches [-n/--dry-run]`**                                     | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone.                                                                                                              |
 
 > **Note:** All commands support `--plain` (disables rich UI formatting) and `-y/--yes` (bypasses confirmation prompts).
+
+### GitHub Utilities
+
+These commands are strictly for GitHub repositories and require the [GitHub CLI (`gh`)](https://cli.github.com/) to be installed and authenticated (`gh auth login`).
+**Recommended:** Install the [github/gh-stack](https://github.com/github/gh-stack) extension (`gh extension install github/gh-stack`) to automatically link PRs into stack tables of contents!
+
+| Command                                                                                    | Description                                                                                                                                                                                                                                                                                                                                                                    |
+| :----------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`git gh-align-pr-bases-and-sync-stacks [prefix] [--current\|--all] [--create-missing]`** | **GitHub PR Sync.** Modifies the base branch of GitHub Pull Requests to perfectly match your local topological history. If `--create-missing` is passed, it will create draft PRs for branches that don't have one. Helps maintain Stacked PRs natively on GitHub without needing the `gh-stack` extension. Defaults to syncing the current branch's linear stack up to trunk. |
 
 ### Working with Worktrees
 

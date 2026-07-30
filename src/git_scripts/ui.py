@@ -1,5 +1,6 @@
 """Rich terminal UI components and abstractions."""
 
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property
@@ -88,7 +89,9 @@ class UI:
         ans = questionary.select(msg, choices=choices, default=default).ask()
         return ans if ans is not None else (default if default else choices[0])
 
-    def ask_checkbox(self, msg: str, choices: list[str]) -> list[str]:
+    def ask_checkbox(
+        self, msg: str, choices: Sequence[str | questionary.Choice]
+    ) -> list[str]:
         """Prompts the user to select a subset of choices.
 
         If auto_yes is True, returns all choices.
@@ -96,14 +99,22 @@ class UI:
         Otherwise, uses `questionary.checkbox`.
         """
         if self.auto_yes:
-            return choices
+            return [
+                str(c.value) if isinstance(c, questionary.Choice) else str(c)
+                for c in choices
+            ]
 
         if self.plain:
             selected = []
             print(f"{msg}")
             for choice in choices:
-                if self.confirm(f"  Delete '{choice}'?"):
-                    selected.append(choice)
+                val = (
+                    choice.value
+                    if isinstance(choice, questionary.Choice)
+                    else choice
+                )
+                if self.confirm(f"  Process '{val}'?"):
+                    selected.append(val)
             return selected
 
         ans = questionary.checkbox(msg, choices=choices).ask()

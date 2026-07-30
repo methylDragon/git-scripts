@@ -5,9 +5,13 @@ from typing import Annotated
 import typer
 
 from git_scripts.cmd.evolve import execute_evolve
+from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
+    execute_align_pr_bases_and_sync_stacks,
+)
 from git_scripts.cmd.prune_local import execute_prune_local
 from git_scripts.cmd.prune_remote import execute_prune_remote
 from git_scripts.cmd.push_prefix import execute_push_prefix
+from git_scripts.cmd.push_stack import execute_push_stack
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
 from git_scripts.ui import UI
 
@@ -47,6 +51,49 @@ def rebase_prefix(
         target=target,
         all_worktrees=all_worktrees,
         auto_delete=auto_delete,
+        ui=ui,
+    )
+    raise typer.Exit(code=0 if success else 1)
+
+
+@app.command(
+    "push-stack",
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+    },
+)
+def push_stack(
+    ctx: typer.Context,
+    target: Annotated[
+        str, typer.Option("--target", help="Target branch")
+    ] = "main",
+    plain: Annotated[
+        bool,
+        typer.Option(
+            "--plain",
+            help="Disable rich formatting and use plain text prompts",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "-y", "--yes", help="Automatically bypass confirmation prompts"
+        ),
+    ] = False,
+):
+    """Batch pushes the current stacked branches to the remote."""
+    ui = UI(plain=plain, auto_yes=yes)
+
+    # Allow all extra args to be passed to git push except our own
+    # internal options. Just be careful not to consume git push flags as
+    # our own options.
+    push_opts = ctx.args
+
+    success = execute_push_stack(
+        repo_path=".",
+        target=target,
+        push_opts=push_opts or [],
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)
@@ -101,7 +148,7 @@ def push_prefix(
 @app.command("evolve")
 def evolve(
     old_hash: Annotated[
-        str, typer.Argument(help="Old base commit sha")
+        str | None, typer.Argument(help="Old base commit sha")
     ] = None,
     plain: Annotated[
         bool,
@@ -193,6 +240,51 @@ def prune_remote(
         target=target,
         dry_run=dry_run,
         also_prune_no_local=also_prune_no_local,
+        ui=ui,
+    )
+    raise typer.Exit(code=0 if success else 1)
+
+
+@app.command("gh-align-pr-bases-and-sync-stacks")
+def gh_align_pr_bases_and_sync_stacks(
+    prefix: Annotated[
+        str | None,
+        typer.Argument(
+            help="Prefix to match (optional, defaults to current stack)"
+        ),
+    ] = None,
+    target: Annotated[str, typer.Argument(help="Target branch")] = "main",
+    current: Annotated[
+        bool,
+        typer.Option("--current", help="Only align the current linear stack"),
+    ] = False,
+    all_matching: Annotated[
+        bool,
+        typer.Option("--all", help="Align all branches matching the prefix"),
+    ] = False,
+    plain: Annotated[
+        bool,
+        typer.Option(
+            "--plain",
+            help="Disable rich formatting and use plain text prompts",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "-y", "--yes", help="Automatically bypass confirmation prompts"
+        ),
+    ] = False,
+):
+    """Aligns GitHub PR bases with local topology."""
+    ui = UI(plain=plain, auto_yes=yes)
+
+    success = execute_align_pr_bases_and_sync_stacks(
+        repo_path=".",
+        prefix=prefix,
+        target=target,
+        current_stack_only=current,
+        all_matching=all_matching,
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)
