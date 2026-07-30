@@ -19,6 +19,9 @@ class TestCmdRebasePrefix(absltest.TestCase):
         # Act
         ui = UI(auto_yes=True)
 
+        # Verify it restores to the initially checked-out branch
+        self.repo_helper.checkout("test-chain-a")
+
         success = execute_rebase_prefix(
             repo_path=self.repo_helper.path,
             prefix="test-chain-",
@@ -28,6 +31,10 @@ class TestCmdRebasePrefix(absltest.TestCase):
             ui=ui,
         )
         self.assertTrue(success)
+
+        # Check that we are back on test-chain-a
+        current_branch = self.repo_helper.get_pygit2_repo().head.shorthand
+        self.assertEqual(current_branch, "test-chain-a")
 
         # Assert topological relationships
         # a stack

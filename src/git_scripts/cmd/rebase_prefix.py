@@ -204,6 +204,12 @@ def execute_rebase_prefix(
         branches_to_delete, branches_to_keep, auto_delete, ui, repo_path
     )
 
+    if start_branch:
+        try:
+            run_cmd(["git", "checkout", start_branch], cwd=repo_path)
+        except GitExecutionError:
+            pass
+
     return len(failed_log) == 0
 
 
