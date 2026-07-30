@@ -7,8 +7,8 @@ version = "0.1.0"
 
 [tasks]
 setup = "pre-commit install-hooks && pre-commit install"
-lint = "ruff check src/ tests/"
-format = "ruff format src/ tests/"
+lint = "pre-commit run --all-files"
+format = "ruff format src/ tests/ && pre-commit run mdformat --all-files && pre-commit run markdownlint --all-files"
 test = "pytest -n auto tests/"
 git-rebase-prefix = "python -m git_scripts.cli rebase_prefix"
 git-push-prefix = "python -m git_scripts.cli push_prefix"
