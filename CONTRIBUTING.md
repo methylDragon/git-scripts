@@ -11,7 +11,7 @@ This tool uses a Hybrid Architecture separating graph analysis from native git m
 This project uses `pixi` for environment and dependency management.
 
 1. **Install Pixi**: <https://pixi.sh/>
-2. **Initialize workspace**: Run `pixi install`. This automatically handles C-extensions (like `libgit2` for `pygit2`) and sets up `pydantic`, `rich`, and testing tools.
+1. **Initialize workspace**: Run `pixi install`. This automatically handles C-extensions (like `libgit2` for `pygit2`) and sets up `pydantic`, `rich`, and testing tools.
 
 ## Tasks
 
