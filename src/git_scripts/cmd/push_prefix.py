@@ -1,4 +1,4 @@
-"""Business logic for pushing branches matching a prefix."""
+"""Core logic for the git-push-prefix command."""
 
 from typing import List
 
@@ -12,7 +12,7 @@ from git_scripts.ui import UI
 def execute_push_prefix(
     repo_path: str, prefix: str, push_opts: List[str] = None, ui=None
 ) -> bool:
-    """Executes a batch push of all unmerged branches matching the prefix."""
+    """Pushes out-of-sync local branches matching the prefix to the remote."""
     if ui is None:
         ui = UI()
 

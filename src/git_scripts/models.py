@@ -1,4 +1,4 @@
-"""Data models for git-scripts."""
+"""Pydantic data models for Git operations."""
 
 from typing import Literal, Optional
 
@@ -6,7 +6,11 @@ from pydantic import BaseModel, ConfigDict
 
 
 class StackAnalysisResult(BaseModel):
-    """Result of analyzing a stack tip for rebasing."""
+    """Rebase action strategy for a single branch based on topology.
+
+    Captures the calculated rebase instruction (skip, cut, or sync) and
+    the necessary git hashes to perform the update without conflicts.
+    """
 
     model_config = ConfigDict(frozen=True)
 

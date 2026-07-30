@@ -1,4 +1,4 @@
-"""Branch topology analysis and graph state."""
+"""Git branch topology analyzer and graph state manager."""
 
 import subprocess
 from typing import Dict, List, Optional, Tuple
@@ -15,7 +15,7 @@ from git_scripts.git.reads import (
 
 
 class TopologyAnalyzer:
-    """Encapsulates the branch stack state and performs topological analysis.
+    """Analyzes and caches Git repository branch topology and obsolescence.
 
     This class is responsible for holding the static branch state (like
     the initial hashes of branches before any operations) and providing
@@ -57,10 +57,16 @@ class TopologyAnalyzer:
             self.repo, branch, self.branches, self.initial_ref_map
         )
 
-    def precompute_obsolescence(
+    def analyze_obsolescence(
         self, target: str, search_depth: int = 100, ui=None
     ) -> None:
-        """Precomputes is_obsolete and cut_point for all tips sequentially."""
+        """Precomputes obsolescence and cut points for all stack tips.
+
+        Evaluates each branch tip against the upstream target branch history
+        (up to search_depth commits) to check if its patches were squashed or
+        merged. The results are cached for fast subsequent retrieval during
+        batch stack operations.
+        """
 
         def _analyze(b_name: str):
             local_repo = pygit2.Repository(self.repo_path)

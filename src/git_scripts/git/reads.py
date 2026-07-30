@@ -8,7 +8,7 @@ import pygit2
 
 
 def get_repo(path: str = ".") -> pygit2.Repository:
-    """Returns a pygit2 Repository object."""
+    """Returns an initialized PyGit2 repository."""
     return pygit2.Repository(pygit2.discover_repository(path))
 
 
@@ -116,7 +116,7 @@ def is_obsolete(
 
 
 def find_tips(repo: pygit2.Repository, branches: List[str]) -> List[str]:
-    """Finds tip branches (branches that are not ancestors of another)."""
+    """Returns branches that are not ancestors of any other in the list."""
     tips = []
 
     for branch in branches:
@@ -269,15 +269,15 @@ def find_sync_point(
     return None
 
 
-def get_stack_refs(
+def get_stack_branches(
     repo: pygit2.Repository,
     tip_name: str,
     prefix: str = "",
     merged_in_target: Optional[str] = None,
 ) -> Set[str]:
-    """Helper to get branches merged into a specific tip/target."""
+    """Returns local branches fully merged into the specified tip/target."""
     tip_commit = repo.revparse_single(tip_name)
-    refs = set()
+    branches = set()
     for ref in repo.references:
         if not ref.startswith("refs/heads/"):
             continue
@@ -288,10 +288,10 @@ def get_stack_refs(
         try:
             ref_commit = repo.revparse_single(ref)
             if repo.merge_base(ref_commit.id, tip_commit.id) == ref_commit.id:
-                refs.add(short_name)
+                branches.add(short_name)
         except (KeyError, ValueError, TypeError):
             continue
-    return refs
+    return branches
 
 
 def format_stack_tree(
@@ -302,12 +302,12 @@ def format_stack_tree(
     filter_merged_in_target: bool = False,
     allowed_refs: Optional[Set[str]] = None,
 ) -> str:
-    """Generates a visual tree string for the stack."""
-    stack_refs = get_stack_refs(repo, tip, prefix)
+    """Generates an ASCII hierarchy tree representing the branch stack."""
+    stack_refs = get_stack_branches(repo, tip, prefix)
 
     target_refs = set()
     if filter_merged_in_target and target:
-        target_refs = get_stack_refs(repo, target, prefix)
+        target_refs = get_stack_branches(repo, target, prefix)
 
     children = []
     for ref in stack_refs:

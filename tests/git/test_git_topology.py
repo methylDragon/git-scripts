@@ -60,8 +60,8 @@ class TestTopologyAnalyzer(absltest.TestCase):
         self.assertIsNotNone(sync_point)
         self.assertEqual(sync_point, ("B", b_old, b_new))
 
-    def test_precompute_obsolescence(self):
-        """Tests precompute obsolescence parallel analysis."""
+    def test_analyze_obsolescence(self):
+        """Tests analyzing branch topology and obsolescence caching."""
         self.repo_helper.checkout("main")
         self.repo_helper.commit("init", "init.txt", "init")
 
@@ -74,7 +74,7 @@ class TestTopologyAnalyzer(absltest.TestCase):
         self.repo_helper.commit("feat on main", "feat.txt", "feat")
 
         analyzer = TopologyAnalyzer(self.repo_helper.path, ["feat"])
-        analyzer.precompute_obsolescence("main")
+        analyzer.analyze_obsolescence("main")
 
         analysis = analyzer.get_analysis("feat")
         self.assertTrue(analysis["is_obs"])

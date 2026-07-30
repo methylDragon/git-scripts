@@ -49,7 +49,7 @@ class TestCmdEvolve(absltest.TestCase):
         self.assertEqual(merge_base, a_commit.id)
 
     def test_execute_evolve_rebases_descendants_using_reflog_heuristic(self):
-        # Do not mock get_previous_head. Let it naturally find the old base!
+        # Do not mock find_old_base. Let it naturally find the old base!
         # Because we just did a commit in setUp() while on test-chain-a,
         # the reflog HEAD@{1} naturally points to old_hash before the commit.
         ui = UI(auto_yes=True)

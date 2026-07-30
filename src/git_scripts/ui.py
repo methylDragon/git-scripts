@@ -19,7 +19,7 @@ class UI:
 
     @cached_property
     def console(self) -> Console:
-        """Returns a configured Rich console."""
+        """Returns a Rich console configured for plain or interactive mode."""
         if self.plain:
             return Console(
                 no_color=True, force_terminal=False, force_interactive=False

@@ -1,4 +1,4 @@
-"""Command execution modules for git-scripts."""
+"""Core command execution modules for the CLI."""
 
 from git_scripts.cmd.evolve import execute_evolve
 from git_scripts.cmd.prune_local import execute_prune_local

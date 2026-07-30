@@ -1,4 +1,4 @@
-"""Business logic for rebasing branches matching a prefix."""
+"""Core logic for the git-rebase-prefix command."""
 
 import time
 from typing import Optional, Set
@@ -10,7 +10,7 @@ from rich.progress import Progress
 
 from git_scripts.git.reads import (
     format_stack_tree,
-    get_stack_refs,
+    get_stack_branches,
     is_obsolete,
 )
 from git_scripts.git.topology import TopologyAnalyzer
@@ -90,7 +90,7 @@ def execute_rebase_prefix(
     search_depth: int = 100,
     ui: Optional[UI] = None,
 ) -> bool:
-    """Core logic for rebase_prefix. Returns True/False for success.
+    """Executes the rebase-prefix command to batch rebase stack branches.
 
     Scans the repository for all branches matching the given `prefix`,
     determines their optimal rebase strategy relative to the `target`
@@ -153,9 +153,7 @@ def execute_rebase_prefix(
 
     start_time = time.time()
     with ui.spinner("Analyzing topology and precomputing obsolescence"):
-        analyzer.precompute_obsolescence(
-            target, search_depth=search_depth, ui=ui
-        )
+        analyzer.analyze_obsolescence(target, search_depth=search_depth, ui=ui)
     elapsed = time.time() - start_time
     ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
 
@@ -231,7 +229,7 @@ def _process_branch_rebase(
     ui,
 ):
     repo = pygit2.Repository(repo_path)
-    stack_refs = get_stack_refs(repo, branch, prefix)
+    stack_refs = get_stack_branches(repo, branch, prefix)
 
     if not all_worktrees:
         blocking_branch = None
@@ -307,7 +305,7 @@ def _process_branch_rebase(
             branches_to_delete.add(ref)
         return
 
-    rebase_ok = _rebase_stack(res, branch, target, repo_path, ui)
+    rebase_ok = _apply_rebase_strategy(res, branch, target, repo_path, ui)
 
     if rebase_ok:
         try:
@@ -340,7 +338,8 @@ def _process_branch_rebase(
         )
 
 
-def _rebase_stack(res, branch, target, repo_path, ui) -> bool:
+def _apply_rebase_strategy(res, branch, target, repo_path, ui) -> bool:
+    """Dispatches the correct pygit2 rebase operation based on analysis."""
     try:
         if (
             res.action == "rebase_onto_sync"

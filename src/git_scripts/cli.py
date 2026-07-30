@@ -1,4 +1,4 @@
-"""Command line interface presentation layer."""
+"""Command-line interface definition and routing."""
 
 from typing import Annotated
 
@@ -49,7 +49,7 @@ def rebase_prefix(
         ),
     ] = False,
 ):
-    """Batch updates stacks by rebasing them onto a target branch."""
+    """Batch rebases stacked branches onto a target branch."""
     ui = UI(plain=plain, auto_yes=yes)
 
     success = execute_rebase_prefix(
@@ -96,7 +96,7 @@ def push_prefix(
         ),
     ] = False,
 ):
-    """Batch push stacks to the remote."""
+    """Batch pushes stacked branches to the remote."""
     ui = UI(plain=plain, auto_yes=yes)
 
     push_opts = [arg for arg in ctx.args if arg != "--all-worktrees"]
@@ -129,7 +129,7 @@ def evolve(
         ),
     ] = False,
 ):
-    """Rescues orphaned children after a stack base is rewritten."""
+    """Rescues orphaned child branches after their base commit is rewritten."""
     ui = UI(plain=plain, auto_yes=yes)
 
     success = execute_evolve(
@@ -160,7 +160,7 @@ def prune_local(
         ),
     ] = False,
 ):
-    """Prunes orphaned local tracking branches."""
+    """Prunes local branches whose remote tracking branches are gone."""
     ui = UI(plain=plain, auto_yes=yes)
 
     success = execute_prune_local(repo_path=".", dry_run=dry_run, ui=ui)
@@ -200,7 +200,7 @@ def prune_remote(
         ),
     ] = False,
 ):
-    """Prunes obsolete remote branches."""
+    """Prunes remote branches that have been fully merged into the target."""
     ui = UI(plain=plain, auto_yes=yes)
 
     success = execute_prune_remote(
@@ -215,7 +215,7 @@ def prune_remote(
 
 
 def main():
-    """Main entrypoint for git-scripts."""
+    """CLI entrypoint."""
     app()
 
 

@@ -1,4 +1,4 @@
-"""Business logic for pruning remote branches."""
+"""Core logic for the git-prune-remote-prefix command."""
 
 import time
 
@@ -54,7 +54,7 @@ def execute_prune_remote(
     search_depth: int = 100,
     ui=None,
 ) -> bool:
-    """Executes the pruning of obsolete remote branches."""
+    """Prunes obsolete remote branches that match a prefix."""
     if ui is None:
         ui = UI()
 

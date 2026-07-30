@@ -1,4 +1,4 @@
-"""Git infrastructure adapters for reading and writing."""
+"""Git adapters for repository read and write operations."""
 
 from git_scripts.git.reads import (
     find_cut_point,
@@ -6,7 +6,7 @@ from git_scripts.git.reads import (
     find_tips,
     format_stack_tree,
     get_repo,
-    get_stack_refs,
+    get_stack_branches,
     is_obsolete,
 )
 from git_scripts.git.writes import (
@@ -25,7 +25,7 @@ __all__ = [
     "find_tips",
     "format_stack_tree",
     "get_repo",
-    "get_stack_refs",
+    "get_stack_branches",
     "is_obsolete",
     "manage_worktrees",
     "push_branches",

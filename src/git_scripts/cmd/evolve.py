@@ -1,4 +1,4 @@
-"""Business logic for git-evolve."""
+"""Core logic for the git-evolve command."""
 
 from typing import Optional
 
@@ -6,13 +6,17 @@ import pygit2
 from rich.console import Group
 from rich.panel import Panel
 
-from git_scripts.git.reads import format_stack_tree, get_repo, get_stack_refs
+from git_scripts.git.reads import (
+    format_stack_tree,
+    get_repo,
+    get_stack_branches,
+)
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.writes import manage_worktrees, rebase_onto
 from git_scripts.ui import UI
 
 
-def _check_remote_tracking(repo, current_branch_name) -> Optional[str]:
+def _find_old_base_via_remote(repo, current_branch_name) -> Optional[str]:
     if not current_branch_name:
         return None
     try:
@@ -38,7 +42,7 @@ def _check_remote_tracking(repo, current_branch_name) -> Optional[str]:
     return None
 
 
-def _check_reflog(repo, current_branch_name) -> Optional[str]:
+def _find_old_base_via_reflog(repo, current_branch_name) -> Optional[str]:
     try:
         log = repo.references["HEAD"].log()
         if not log:
@@ -72,13 +76,13 @@ def _check_reflog(repo, current_branch_name) -> Optional[str]:
     return None
 
 
-def get_previous_head(repo_path: str) -> Optional[str]:
-    """Finds the most likely previous HEAD hash before an amend/rebase.
+def find_old_base(repo_path: str) -> Optional[str]:
+    """Auto-detects the pre-rewrite hash of a target branch.
 
     When `git-evolve` is run without an explicit `<OLD_HASH>`, it must
-    determine where the current branch used to point before it was moved.
-    This is critical to find "orphaned" stack branches that were attached
-    to the old state.
+    determine where the base branch used to point before it was rewritten.
+    This is critical for finding orphaned child branches that are still
+    attached to that old state.
 
     Uses multi-layered heuristics to auto-detect this "movement":
     1. Remote tracking branch: If the local branch has been rewritten but
@@ -100,11 +104,11 @@ def get_previous_head(repo_path: str) -> Optional[str]:
     except pygit2.GitError:
         pass
 
-    ans = _check_remote_tracking(repo, current_branch_name)
+    ans = _find_old_base_via_remote(repo, current_branch_name)
     if ans:
         return ans
 
-    return _check_reflog(repo, current_branch_name)
+    return _find_old_base_via_reflog(repo, current_branch_name)
 
 
 def execute_evolve(
@@ -112,7 +116,7 @@ def execute_evolve(
     old_hash: Optional[str] = None,
     ui: Optional[UI] = None,
 ) -> bool:
-    """Executes the evolve operation, rebasing displaced stacks.
+    """Rebases displaced stack branches onto the updated base commit.
 
     When an upstream branch is rebased, child branches (stacks) become
     "orphaned" because their base commit is no longer part of the target
@@ -145,7 +149,7 @@ def execute_evolve(
         pass
 
     if not old_hash:
-        old_hash = get_previous_head(repo_path)
+        old_hash = find_old_base(repo_path)
         if not old_hash:
             ui.print("❌  Error: Could not find previous HEAD in reflog.")
             ui.print("Usage: git-evolve <OLD_HASH>")
@@ -247,6 +251,7 @@ def execute_evolve(
 
 
 def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
+    """Finds branches whose merge-base matches the old hash but not the new."""
     orphans = []
     try:
         old_commit = repo.revparse_single(old_hash)
@@ -293,7 +298,7 @@ def _evolve_stacks(
         for tip in analyzer.tips:
             ui.print(f"🔗 Reconnecting stack '{tip}'...")
             repo = get_repo(repo_path)
-            stack_refs = get_stack_refs(repo, tip)
+            stack_refs = get_stack_branches(repo, tip)
 
             # Check if any branch in this stack failed to detach
             if (

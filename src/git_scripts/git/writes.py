@@ -1,4 +1,4 @@
-"""Subprocess wrappers for git write operations."""
+"""Git subprocess wrappers for state-mutating operations."""
 
 import os
 import shlex
@@ -16,7 +16,7 @@ class GitExecutionError(Exception):
 def run_cmd(
     cmd: List[str], cwd: Optional[str] = None, check: bool = True
 ) -> str:
-    """Helper to run a subprocess command."""
+    """Executes a subprocess command and returns stripped stdout."""
     try:
         result = subprocess.run(
             cmd,
@@ -35,7 +35,7 @@ def run_cmd(
 
 
 def is_in_another_worktree(repo_path: str, branch_name: str) -> bool:
-    """Checks if branch is checked out in a different worktree."""
+    """Returns True if the branch is active in another git worktree."""
     try:
         current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
         if current == branch_name:
@@ -49,7 +49,7 @@ def is_in_another_worktree(repo_path: str, branch_name: str) -> bool:
 
 
 def update_target(repo_path: str, target: str, ui) -> bool:
-    """Safely updates the target branch by pulling from upstream."""
+    """Fetches and rebases the target branch from its remote upstream."""
     try:
         # Check if target exists
         run_cmd(
@@ -120,9 +120,12 @@ def update_target(repo_path: str, target: str, ui) -> bool:
 def _detach_worktrees(
     prefix: str = "", repo_path: str = "."
 ) -> Tuple[Dict[str, str], Set[str]]:
-    """Internal helper to detach worktrees.
+    """Detaches HEAD in all inactive worktrees to free branches.
 
-    Returns (detached_map, failed_branches).
+    Git strictly locks branches that are checked out in any worktree,
+    preventing them from being rebased or modified. This safely detaches
+    their HEADs (storing their original state in detached_map) so that
+    cross-worktree batch operations can succeed without git lock errors.
     """
     detached_map: Dict[str, str] = {}
     failed_branches: Set[str] = set()
@@ -203,8 +206,7 @@ def _detach_worktrees(
 def _reattach_worktrees(
     detached_map: Dict[str, str], repo_path: str = "."
 ) -> None:
-    """Internal helper to reattach branches to worktrees."""
-    """Internal helper to reattach worktrees."""
+    """Re-checks out branches in their respective worktrees."""
     for wt, branch in detached_map.items():
         try:
             run_cmd(["git", "checkout", branch], cwd=wt)
@@ -218,9 +220,9 @@ def _reattach_worktrees(
 def manage_worktrees(
     prefix: str = "", active: bool = True, repo_path: str = "."
 ) -> Generator[Tuple[Dict[str, str], Set[str]], None, None]:
-    """Context manager to detach branches in other worktrees temporarily.
+    """Temporarily detaches branches in other worktrees during execution.
 
-    If active=False, it yields (empty_map, empty_set) and does nothing.
+    Yields empty context if active=False to simplify conditional usage.
     """
     detached_map = {}
     failed_branches = set()
@@ -236,7 +238,7 @@ def manage_worktrees(
 def rebase_onto(
     onto_hash: str, old_base_hash: str, branch: str, repo_path: str = "."
 ) -> bool:
-    """Rebases a branch onto a new base, updating intermediate refs."""
+    """Executes git rebase --onto with --update-refs to port a stack."""
     try:
         run_cmd(
             [
@@ -261,7 +263,7 @@ def rebase_onto(
 
 
 def rebase_standard(target: str, branch: str, repo_path: str = ".") -> bool:
-    """Standard rebase onto target."""
+    """Executes a standard git rebase onto the target branch."""
     try:
         run_cmd(
             [
@@ -286,7 +288,7 @@ def rebase_standard(target: str, branch: str, repo_path: str = ".") -> bool:
 def push_branches(
     branches: List[str], options: List[str], repo_path: str = "."
 ) -> bool:
-    """Pushes a batch of branches to origin."""
+    """Pushes multiple branches to origin with optional git flags."""
     if not branches:
         return True
     cmd = ["git", "push", "origin"] + branches + options

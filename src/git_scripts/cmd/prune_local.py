@@ -1,4 +1,4 @@
-"""Business logic for pruning local branches."""
+"""Core logic for the git-prune-local-branches command."""
 
 from rich.panel import Panel
 
@@ -43,7 +43,7 @@ def _get_gone_branches(
 def execute_prune_local(
     repo_path: str, dry_run: bool = False, ui=None
 ) -> bool:
-    """Executes the pruning of fully merged local branches."""
+    """Prunes local branches that no longer exist on the remote."""
     if ui is None:
         ui = UI()
 
