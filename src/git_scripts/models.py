@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class RebaseAction(Enum):
@@ -35,19 +34,19 @@ class BranchRebaseResult:
     action: RebaseAction
 
     # Optional explanation for the chosen action (e.g., 'Fully merged').
-    reason: Optional[str] = None
+    reason: str | None = None
 
     # The parent branch this branch is stacked on (if any).
-    sync_branch: Optional[str] = None
+    sync_branch: str | None = None
 
     # The hash the sync_branch pointed to before it was moved.
-    sync_old_hash: Optional[str] = None
+    sync_old_hash: str | None = None
 
     # The hash the sync_branch currently points to.
-    sync_new_hash: Optional[str] = None
+    sync_new_hash: str | None = None
 
     # The commit hash to cut from if the base was squashed/rebased.
-    cut_point: Optional[str] = None
+    cut_point: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +68,7 @@ class TopologyAnalysisResult:
     is_obsolete: bool
 
     # The latest common ancestor commit if the branch needs cutting.
-    cut_point: Optional[str] = None
+    cut_point: str | None = None
 
 
 @dataclass(frozen=True)

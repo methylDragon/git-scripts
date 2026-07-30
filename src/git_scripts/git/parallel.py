@@ -1,8 +1,9 @@
 """Parallel execution utilities for Git branch analysis."""
 
 import subprocess
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Iterable, TypeVar
+from typing import TypeVar
 
 from rich.progress import Progress
 

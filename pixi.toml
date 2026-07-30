@@ -7,8 +7,8 @@ version = "0.1.0"
 
 [tasks]
 setup = "pre-commit install-hooks && pre-commit install"
-lint = "pre-commit run --all-files"
-format = "ruff format src/ tests/ && pre-commit run mdformat --all-files && pre-commit run markdownlint --all-files"
+lint = "ruff check --fix src/ tests/ && pyright src/ tests/ && pre-commit run --all-files"
+format = "pyupgrade --py310-plus `find src tests -name '*.py'` && ruff format src/ tests/ && pre-commit run mdformat --all-files && pre-commit run markdownlint --all-files"
 test = "pytest -n auto tests/"
 git-rebase-prefix = "python -m git_scripts.cli rebase_prefix"
 git-push-prefix = "python -m git_scripts.cli push_prefix"
@@ -17,6 +17,8 @@ git-prune-local-branches = "python -m git_scripts.cli prune_local_branches"
 git-prune-remote-prefix = "python -m git_scripts.cli prune_remote_prefix"
 
 [dependencies]
+pyupgrade = ">=3.19.1,<4"
+pyright = ">=1.1.300,<2"
 pygit2 = ">=1.19.3,<2"
 rich = ">=15.0.0,<16"
 questionary = ">=2.1.1,<3"

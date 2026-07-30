@@ -1,7 +1,5 @@
 """Core logic for the git-push-prefix command."""
 
-from typing import List
-
 import pygit2
 from rich.panel import Panel
 
@@ -11,7 +9,7 @@ from git_scripts.ui import UI
 
 def _get_out_of_sync_branches(
     repo: pygit2.Repository, prefix: str
-) -> tuple[List[str], int]:
+) -> tuple[list[str], int]:
     """Finds local branches matching prefix that differ from remote."""
     branches_to_push = []
     up_to_date_count = 0
@@ -35,7 +33,7 @@ def _get_out_of_sync_branches(
 
 
 def execute_push_prefix(
-    repo_path: str, prefix: str, push_opts: List[str] = None, ui=None
+    repo_path: str, prefix: str, push_opts: list[str] | None = None, ui=None
 ) -> bool:
     """Pushes out-of-sync local branches matching the prefix to the remote."""
     if ui is None:

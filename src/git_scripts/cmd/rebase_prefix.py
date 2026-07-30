@@ -1,7 +1,6 @@
 """Core logic for the git-rebase-prefix command."""
 
 import time
-from typing import Optional, Set
 
 import pygit2
 from rich.console import Group
@@ -87,7 +86,7 @@ def execute_rebase_prefix(
     target: str = "main",
     all_worktrees: bool = False,
     auto_delete: bool = False,
-    ui: Optional[UI] = None,
+    ui: UI | None = None,
 ) -> bool:
     """Executes the rebase-prefix command to batch rebase stack branches.
 
@@ -157,8 +156,8 @@ def execute_rebase_prefix(
     success_log = []
     skipped_log = []
     failed_log = []
-    branches_to_delete: Set[str] = set()
-    branches_to_keep: Set[str] = set()
+    branches_to_delete: set[str] = set()
+    branches_to_keep: set[str] = set()
 
     if all_worktrees:
         ui.print(

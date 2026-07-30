@@ -1,7 +1,5 @@
 """Core logic for the git-evolve command."""
 
-from typing import Optional
-
 import pygit2
 from rich.console import Group
 from rich.panel import Panel
@@ -16,7 +14,7 @@ from git_scripts.git.writes import manage_worktrees, rebase_onto
 from git_scripts.ui import UI
 
 
-def _find_old_base_via_remote(repo, current_branch_name) -> Optional[str]:
+def _find_old_base_via_remote(repo, current_branch_name) -> str | None:
     if not current_branch_name:
         return None
     try:
@@ -42,7 +40,7 @@ def _find_old_base_via_remote(repo, current_branch_name) -> Optional[str]:
     return None
 
 
-def _find_old_base_via_reflog(repo, current_branch_name) -> Optional[str]:
+def _find_old_base_via_reflog(repo, current_branch_name) -> str | None:
     try:
         log = repo.references["HEAD"].log()
         if not log:
@@ -76,7 +74,7 @@ def _find_old_base_via_reflog(repo, current_branch_name) -> Optional[str]:
     return None
 
 
-def find_old_base(repo_path: str) -> Optional[str]:
+def find_old_base(repo_path: str) -> str | None:
     """Auto-detects the pre-rewrite hash of a target branch.
 
     When `git-evolve` is run without an explicit `<OLD_HASH>`, it must
@@ -154,8 +152,8 @@ def _print_evolve_summary(ui, success_count: int, failed_log: list) -> bool:
 
 def execute_evolve(
     repo_path: str,
-    old_hash: Optional[str] = None,
-    ui: Optional[UI] = None,
+    old_hash: str | None = None,
+    ui: UI | None = None,
 ) -> bool:
     """Rebases displaced stack branches onto the updated base commit.
 

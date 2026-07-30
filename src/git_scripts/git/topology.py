@@ -1,7 +1,6 @@
 """Git branch topology analyzer and graph state manager."""
 
 import subprocess
-from typing import Dict, List, Optional, Tuple
 
 import pygit2
 
@@ -24,7 +23,7 @@ class TopologyAnalyzer:
     points, and sync points.
     """
 
-    def __init__(self, repo_path: str, branches: List[str]):
+    def __init__(self, repo_path: str, branches: list[str]):
         """Initializes the analyzer with a repository and a set of branches.
 
         Args:
@@ -36,19 +35,19 @@ class TopologyAnalyzer:
         self.branches = branches
 
         # Precompute initial hashes to track movement during rebases
-        self.initial_ref_map: Dict[str, str] = {}
+        self.initial_ref_map: dict[str, str] = {}
         for b in branches:
             try:
                 self.initial_ref_map[b] = str(self.repo.revparse_single(b).id)
             except (KeyError, ValueError, pygit2.GitError):
                 pass
 
-        self.tips: List[str] = find_tips(self.repo, self.branches)
+        self.tips: list[str] = find_tips(self.repo, self.branches)
 
         # Cache for expensive analysis
-        self._analysis_cache: Dict[str, TopologyAnalysisResult] = {}
+        self._analysis_cache: dict[str, TopologyAnalysisResult] = {}
 
-    def get_sync_point(self, branch: str) -> Optional[Tuple[str, str, str]]:
+    def get_sync_point(self, branch: str) -> tuple[str, str, str] | None:
         """Finds closest ancestor of the branch that has already been rebased.
 
         Returns:

@@ -3,8 +3,8 @@
 import os
 import shlex
 import subprocess
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Dict, Generator, List, Optional, Set
 
 from git_scripts.models import WorktreeState
 
@@ -15,22 +15,19 @@ class GitExecutionError(Exception):
     pass
 
 
-def run_cmd(
-    cmd: List[str], cwd: Optional[str] = None, check: bool = True
-) -> str:
+def run_cmd(cmd: list[str], cwd: str | None = None, check: bool = True) -> str:
     """Executes a subprocess command and returns stripped stdout."""
     try:
         result = subprocess.run(
             cmd,
             cwd=cwd,
             check=check,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        cmd_str = " ".join(shlex.quote(c) for c in cmd)
+        cmd_str = shlex.join(cmd)
         raise GitExecutionError(
             f"Command failed: {cmd_str}\nError: {e.stderr.strip()}"
         ) from e
@@ -143,8 +140,8 @@ def _detach_worktrees(prefix: str = "", repo_path: str = ".") -> WorktreeState:
     their HEADs (storing their original state in detached_map) so that
     cross-worktree batch operations can succeed without git lock errors.
     """
-    detached_map: Dict[str, str] = {}
-    failed_branches: Set[str] = set()
+    detached_map: dict[str, str] = {}
+    failed_branches: set[str] = set()
     try:
         worktrees_out = run_cmd(
             ["git", "worktree", "list", "--porcelain"], cwd=repo_path
@@ -207,7 +204,7 @@ def _detach_worktrees(prefix: str = "", repo_path: str = ".") -> WorktreeState:
 
 
 def _reattach_worktrees(
-    detached_map: Dict[str, str], repo_path: str = "."
+    detached_map: dict[str, str], repo_path: str = "."
 ) -> None:
     """Re-checks out branches in their respective worktrees."""
     for wt, branch in detached_map.items():
@@ -288,7 +285,7 @@ def rebase_standard(target: str, branch: str, repo_path: str = ".") -> bool:
 
 
 def push_branches(
-    branches: List[str], options: List[str], repo_path: str = "."
+    branches: list[str], options: list[str], repo_path: str = "."
 ) -> bool:
     """Pushes multiple branches to origin with optional git flags."""
     if not branches:

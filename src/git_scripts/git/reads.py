@@ -2,7 +2,6 @@
 
 import subprocess
 from functools import lru_cache
-from typing import Dict, List, Optional, Set, Tuple
 
 import pygit2
 
@@ -16,7 +15,7 @@ def _check_squash_merge(
     repo_path: str,
     commit_hash: str,
     target_ref: str,
-    target_tree: Optional[str] = None,
+    target_tree: str | None = None,
 ) -> bool:
     """Returns True if commit_hash is squash-merged into target_ref."""
     if target_tree is None:
@@ -107,11 +106,14 @@ def is_obsolete(
     commit_oid: pygit2.Oid,
     target_ref: str,
 ) -> bool:
-    """Checks if a commit is content-equivalent to upstream using git subprocesses for speed."""  # noqa: E501
+    """Checks if a commit is content-equivalent to upstream.
+
+    Uses git subprocesses for speed.
+    """
     return _is_obsolete_cached(repo.path, str(commit_oid), target_ref)
 
 
-def find_tips(repo: pygit2.Repository, branches: List[str]) -> List[str]:
+def find_tips(repo: pygit2.Repository, branches: list[str]) -> list[str]:
     """Returns branches that are not ancestors of any other in the list."""
     tips = []
 
@@ -142,7 +144,7 @@ def find_cut_point(
     repo: pygit2.Repository,
     tip_hash: str,
     target_ref: str,
-) -> Optional[str]:
+) -> str | None:
     """Finds the boundary commit where a local branch diverges from merged.
 
     Uses `git cherry` internally to get the patch equivalence of all commits
@@ -174,7 +176,7 @@ def find_cut_point(
     tip_commit = repo.revparse_single(tip_hash)
     target_commit = repo.revparse_single(target_ref)
 
-    walker = repo.walk(tip_commit.id, pygit2.GIT_SORT_TOPOLOGICAL)
+    walker = repo.walk(tip_commit.id, pygit2.enums.SortMode.TOPOLOGICAL)
     walker.hide(target_commit.id)
 
     target_tree = None
@@ -210,9 +212,9 @@ def find_cut_point(
 def find_sync_point(
     repo: pygit2.Repository,
     branch: str,
-    all_branches: List[str],
-    initial_ref_map: Dict[str, str],
-) -> Optional[Tuple[str, str, str]]:
+    all_branches: list[str],
+    initial_ref_map: dict[str, str],
+) -> tuple[str, str, str] | None:
     """Finds closest ancestor of the branch that has already been rebased.
 
     Returns: (sync_branch_name, old_hash, new_hash)
@@ -245,7 +247,7 @@ def find_sync_point(
                 # We count commits between candidate_initial and branch
                 # Not very trivial in pygit2 without walking, so we walk:
                 walker = repo.walk(
-                    branch_commit.id, pygit2.GIT_SORT_TOPOLOGICAL
+                    branch_commit.id, pygit2.enums.SortMode.TOPOLOGICAL
                 )
                 walker.hide(candidate_initial_commit.id)
                 dist = sum(1 for _ in walker)
@@ -265,8 +267,8 @@ def get_stack_branches(
     repo: pygit2.Repository,
     tip_name: str,
     prefix: str = "",
-    merged_in_target: Optional[str] = None,
-) -> Set[str]:
+    merged_in_target: str | None = None,
+) -> set[str]:
     """Returns local branches fully merged into the specified tip/target."""
     tip_commit = repo.revparse_single(tip_name)
     branches = set()
@@ -292,7 +294,7 @@ def format_stack_tree(
     prefix: str = "",
     target: str = "",
     filter_merged_in_target: bool = False,
-    allowed_refs: Optional[Set[str]] = None,
+    allowed_refs: set[str] | None = None,
 ) -> str:
     """Generates an ASCII hierarchy tree representing the branch stack."""
     stack_refs = get_stack_branches(repo, tip, prefix)
@@ -317,7 +319,9 @@ def format_stack_tree(
     def get_distance(child_ref):
         try:
             child_commit = repo.revparse_single(child_ref)
-            walker = repo.walk(tip_commit.id, pygit2.GIT_SORT_TOPOLOGICAL)
+            walker = repo.walk(
+                tip_commit.id, pygit2.enums.SortMode.TOPOLOGICAL
+            )
             walker.hide(child_commit.id)
             return sum(1 for _ in walker)
         except (KeyError, ValueError, TypeError):

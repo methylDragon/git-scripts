@@ -3,7 +3,6 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Optional
 
 import questionary
 from rich.console import Console
@@ -49,7 +48,7 @@ class UI:
         return Confirm.ask(msg)
 
     def ask_choice(
-        self, msg: str, choices: list[str], default: Optional[str] = None
+        self, msg: str, choices: list[str], default: str | None = None
     ) -> str:
         """Prompts the user to select a single choice from a list.
 
