@@ -88,15 +88,16 @@ def execute_prune_local(
             default="Skip all",
         )
 
-        if action == "Delete all":
-            pass
-        elif action == "Select which to delete":
-            branches_to_prune = ui.ask_checkbox(
-                "Select orphaned local branches to delete:",
-                choices=branches_to_prune,
-            )
-        else:
-            branches_to_prune = []
+        match action:
+            case "Delete all":
+                pass
+            case "Select which to delete":
+                branches_to_prune = ui.ask_checkbox(
+                    "Select orphaned local branches to delete:",
+                    choices=branches_to_prune,
+                )
+            case _:
+                branches_to_prune = []
 
     if not branches_to_prune:
         return True

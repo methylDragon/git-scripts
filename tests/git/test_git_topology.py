@@ -77,8 +77,8 @@ class TestTopologyAnalyzer(absltest.TestCase):
         analyzer.analyze_obsolescence("main")
 
         analysis = analyzer.get_analysis("feat")
-        self.assertTrue(analysis["is_obs"])
-        self.assertIsNone(analysis["cut_point"])
+        self.assertTrue(analysis.is_obsolete)
+        self.assertIsNone(analysis.cut_point)
 
 
 if __name__ == "__main__":

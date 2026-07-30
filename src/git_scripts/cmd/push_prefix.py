@@ -9,6 +9,31 @@ from git_scripts.git.writes import GitExecutionError, push_branches, run_cmd
 from git_scripts.ui import UI
 
 
+def _get_out_of_sync_branches(
+    repo: pygit2.Repository, prefix: str
+) -> tuple[List[str], int]:
+    """Finds local branches matching prefix that differ from remote."""
+    branches_to_push = []
+    up_to_date_count = 0
+
+    for ref in repo.references:
+        if ref.startswith(f"refs/heads/{prefix}"):
+            short_name = ref[len("refs/heads/") :]
+            local_commit = repo.revparse_single(ref)
+            try:
+                remote_commit = repo.revparse_single(
+                    f"refs/remotes/origin/{short_name}"
+                )
+                if local_commit.id != remote_commit.id:
+                    branches_to_push.append(short_name)
+                else:
+                    up_to_date_count += 1
+            except KeyError:
+                branches_to_push.append(short_name)
+
+    return branches_to_push, up_to_date_count
+
+
 def execute_push_prefix(
     repo_path: str, prefix: str, push_opts: List[str] = None, ui=None
 ) -> bool:
@@ -31,23 +56,9 @@ def execute_push_prefix(
 
     ui.print(f"[cyan]🔍  Scanning 'refs/heads/{prefix}*'...[/cyan]")
 
-    branches_to_push = []
-    up_to_date_count = 0
-
-    for ref in repo.references:
-        if ref.startswith(f"refs/heads/{prefix}"):
-            short_name = ref[len("refs/heads/") :]
-            local_commit = repo.revparse_single(ref)
-            try:
-                remote_commit = repo.revparse_single(
-                    f"refs/remotes/origin/{short_name}"
-                )
-                if local_commit.id != remote_commit.id:
-                    branches_to_push.append(short_name)
-                else:
-                    up_to_date_count += 1
-            except KeyError:
-                branches_to_push.append(short_name)
+    branches_to_push, up_to_date_count = _get_out_of_sync_branches(
+        repo, prefix
+    )
 
     if not branches_to_push:
         if up_to_date_count == 0:
@@ -79,13 +90,14 @@ def execute_push_prefix(
             choices=["Push all", "Select which to push", "Skip all"],
             default="Push all",
         )
-        if action == "Skip all":
-            ui.print("❌  Operation cancelled.")
-            return True
-        elif action == "Select which to push":
-            branches_to_push = ui.ask_checkbox(
-                "Select branches to push:", choices=branches_to_push
-            )
+        match action:
+            case "Skip all":
+                ui.print("❌  Operation cancelled.")
+                return True
+            case "Select which to push":
+                branches_to_push = ui.ask_checkbox(
+                    "Select branches to push:", choices=branches_to_push
+                )
 
     if not branches_to_push:
         ui.print("❌  Operation cancelled.")

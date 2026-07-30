@@ -23,7 +23,7 @@ from git_scripts.git.writes import (
     run_cmd,
     update_target,
 )
-from git_scripts.models import StackAnalysisResult
+from git_scripts.models import BranchRebaseResult, RebaseAction
 from git_scripts.ui import UI
 
 
@@ -87,7 +87,6 @@ def execute_rebase_prefix(
     target: str = "main",
     all_worktrees: bool = False,
     auto_delete: bool = False,
-    search_depth: int = 100,
     ui: Optional[UI] = None,
 ) -> bool:
     """Executes the rebase-prefix command to batch rebase stack branches.
@@ -111,7 +110,6 @@ def execute_rebase_prefix(
         all_worktrees: If True, detaches branches checked out in other
             worktrees before rebasing to avoid git lock errors.
         auto_delete: If True, fully merged branches are deleted.
-        search_depth: Commits to traverse back to detect squash merges.
         ui: Optional UI instance for output and confirmation prompts.
 
     Returns:
@@ -152,8 +150,7 @@ def execute_rebase_prefix(
     ui.print(f"  [bold]Found {len(analyzer.tips)} stack tips.[/bold]")
 
     start_time = time.time()
-    with ui.spinner("Analyzing topology and precomputing obsolescence"):
-        analyzer.analyze_obsolescence(target, search_depth=search_depth, ui=ui)
+    analyzer.analyze_obsolescence(target, ui=ui)
     elapsed = time.time() - start_time
     ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
 
@@ -170,10 +167,8 @@ def execute_rebase_prefix(
 
     with manage_worktrees(
         prefix, active=all_worktrees, repo_path=repo_path
-    ) as (
-        detached_map,
-        failed_branches,
-    ):
+    ) as wt_state:
+        failed_branches = wt_state.failed_branches
         with Progress(console=ui.console, transient=True) as progress:
             total_tips = len(analyzer.tips)
             task = progress.add_task(
@@ -211,6 +206,38 @@ def execute_rebase_prefix(
     )
 
     return len(failed_log) == 0
+
+
+def _determine_rebase_strategy(
+    analyzer: TopologyAnalyzer, branch: str
+) -> BranchRebaseResult:
+    analysis_data = analyzer.get_analysis(branch)
+    if analysis_data.is_obsolete:
+        return BranchRebaseResult(
+            branch=branch, action=RebaseAction.SKIP, reason="Fully merged"
+        )
+
+    sync_point = analyzer.get_sync_point(branch)
+    if sync_point:
+        return BranchRebaseResult(
+            branch=branch,
+            action=RebaseAction.REBASE_ONTO_SYNC,
+            sync_branch=sync_point[0],
+            sync_old_hash=sync_point[1],
+            sync_new_hash=sync_point[2],
+        )
+
+    cut_point = analysis_data.cut_point
+    if cut_point:
+        return BranchRebaseResult(
+            branch=branch,
+            action=RebaseAction.REBASE_ONTO_CUT,
+            cut_point=cut_point,
+        )
+
+    return BranchRebaseResult(
+        branch=branch, action=RebaseAction.REBASE_STANDARD
+    )
 
 
 def _process_branch_rebase(
@@ -267,35 +294,9 @@ def _process_branch_rebase(
         )
         return
 
-    analysis_data = analyzer.get_analysis(branch)
-    if analysis_data["is_obs"]:
-        res = StackAnalysisResult(
-            branch=branch, action="skip", reason="Fully merged"
-        )
-    else:
-        sync_point = analyzer.get_sync_point(branch)
-        if sync_point:
-            res = StackAnalysisResult(
-                branch=branch,
-                action="rebase_onto_sync",
-                sync_branch=sync_point[0],
-                sync_old_hash=sync_point[1],
-                sync_new_hash=sync_point[2],
-            )
-        else:
-            cut_point = analysis_data["cut_point"]
-            if cut_point:
-                res = StackAnalysisResult(
-                    branch=branch,
-                    action="rebase_onto_cut",
-                    cut_point=cut_point,
-                )
-            else:
-                res = StackAnalysisResult(
-                    branch=branch, action="rebase_standard"
-                )
+    res = _determine_rebase_strategy(analyzer, branch)
 
-    if res.action == "skip":
+    if res.action == RebaseAction.SKIP:
         skipped_log.append(
             format_stack_tree(
                 repo, branch, prefix, target, filter_merged_in_target=False
@@ -341,24 +342,24 @@ def _process_branch_rebase(
 def _apply_rebase_strategy(res, branch, target, repo_path, ui) -> bool:
     """Dispatches the correct pygit2 rebase operation based on analysis."""
     try:
-        if (
-            res.action == "rebase_onto_sync"
-            and res.sync_new_hash
-            and res.sync_old_hash
-        ):
-            return rebase_onto(
-                res.sync_new_hash,
-                res.sync_old_hash,
-                branch,
-                repo_path=repo_path,
-            )
-        elif res.action == "rebase_onto_cut" and res.cut_point:
-            return rebase_onto(
-                target, res.cut_point, branch, repo_path=repo_path
-            )
-        elif res.action == "rebase_standard":
-            return rebase_standard(target, branch, repo_path=repo_path)
-        return False
+        match res.action:
+            case RebaseAction.REBASE_ONTO_SYNC if (
+                res.sync_new_hash and res.sync_old_hash
+            ):
+                return rebase_onto(
+                    res.sync_new_hash,
+                    res.sync_old_hash,
+                    branch,
+                    repo_path=repo_path,
+                )
+            case RebaseAction.REBASE_ONTO_CUT if res.cut_point:
+                return rebase_onto(
+                    target, res.cut_point, branch, repo_path=repo_path
+                )
+            case RebaseAction.REBASE_STANDARD:
+                return rebase_standard(target, branch, repo_path=repo_path)
+            case _:
+                return False
     except GitExecutionError as e:
         # Extract just the useful git stderr from our custom exception
         err_msg = str(e)
@@ -401,15 +402,16 @@ def _delete_merged(
             default="Skip all",
         )
 
-        if action == "Delete all":
-            selected_to_delete = unique_to_delete
-        elif action == "Select which to delete":
-            selected_to_delete = ui.ask_checkbox(
-                f"Select fully merged local {word} to delete:",
-                choices=unique_to_delete,
-            )
-        else:
-            selected_to_delete = []
+        match action:
+            case "Delete all":
+                selected_to_delete = unique_to_delete
+            case "Select which to delete":
+                selected_to_delete = ui.ask_checkbox(
+                    f"Select fully merged local {word} to delete:",
+                    choices=unique_to_delete,
+                )
+            case _:
+                selected_to_delete = []
 
     if selected_to_delete:
         try:

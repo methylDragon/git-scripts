@@ -47,7 +47,7 @@ def _check_squash_merge(
 
 @lru_cache(maxsize=1024)
 def _is_obsolete_cached(
-    repo_path: str, commit_hash: str, target_ref: str, search_depth: int
+    repo_path: str, commit_hash: str, target_ref: str
 ) -> bool:
     """Cached version of obsolete check using subprocesses."""
     if repo_path.endswith("/.git/") or repo_path.endswith("/.git"):
@@ -85,9 +85,8 @@ def _is_obsolete_cached(
             [
                 "git",
                 "log",
-                f"--max-count={search_depth}",
                 "--pretty=%T",
-                target_ref,
+                f"{commit_hash}..{target_ref}",
             ],
             cwd=repo_path,
             capture_output=True,
@@ -107,12 +106,9 @@ def is_obsolete(
     repo: pygit2.Repository,
     commit_oid: pygit2.Oid,
     target_ref: str,
-    search_depth: int = 100,
 ) -> bool:
     """Checks if a commit is content-equivalent to upstream using git subprocesses for speed."""  # noqa: E501
-    return _is_obsolete_cached(
-        repo.path, str(commit_oid), target_ref, search_depth
-    )
+    return _is_obsolete_cached(repo.path, str(commit_oid), target_ref)
 
 
 def find_tips(repo: pygit2.Repository, branches: List[str]) -> List[str]:
@@ -146,7 +142,6 @@ def find_cut_point(
     repo: pygit2.Repository,
     tip_hash: str,
     target_ref: str,
-    search_depth: int = 100,
 ) -> Optional[str]:
     """Finds the boundary commit where a local branch diverges from merged.
 
@@ -184,10 +179,7 @@ def find_cut_point(
 
     target_tree = None
 
-    for i, commit in enumerate(walker):
-        if i > search_depth:
-            break
-
+    for commit in walker:
         sha = str(commit.id)
         status = status_map.get(sha, "")
 

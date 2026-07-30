@@ -4,7 +4,9 @@ import os
 import shlex
 import subprocess
 from contextlib import contextmanager
-from typing import Dict, Generator, List, Optional, Set, Tuple
+from typing import Dict, Generator, List, Optional, Set
+
+from git_scripts.models import WorktreeState
 
 
 class GitExecutionError(Exception):
@@ -117,9 +119,23 @@ def update_target(repo_path: str, target: str, ui) -> bool:
         return False
 
 
-def _detach_worktrees(
-    prefix: str = "", repo_path: str = "."
-) -> Tuple[Dict[str, str], Set[str]]:
+def _is_worktree_busy(current_wt: str) -> bool:
+    try:
+        git_dir = run_cmd(["git", "rev-parse", "--git-dir"], cwd=current_wt)
+        return (
+            os.path.exists(os.path.join(current_wt, git_dir, "MERGE_HEAD"))
+            or os.path.exists(
+                os.path.join(current_wt, git_dir, "rebase-merge")
+            )
+            or os.path.exists(
+                os.path.join(current_wt, git_dir, "rebase-apply")
+            )
+        )
+    except GitExecutionError:
+        return False
+
+
+def _detach_worktrees(prefix: str = "", repo_path: str = ".") -> WorktreeState:
     """Detaches HEAD in all inactive worktrees to free branches.
 
     Git strictly locks branches that are checked out in any worktree,
@@ -135,7 +151,9 @@ def _detach_worktrees(
         )
     except GitExecutionError as e:
         print(f"DEBUG Error: {e}")
-        return detached_map, failed_branches
+        return WorktreeState(
+            detached_map=detached_map, failed_branches=failed_branches
+        )
 
     try:
         toplevel = run_cmd(
@@ -159,30 +177,13 @@ def _detach_worktrees(
                 continue
 
             # Check if busy (merge/rebase in progress)
-            try:
-                git_dir = run_cmd(
-                    ["git", "rev-parse", "--git-dir"], cwd=current_wt
+            if _is_worktree_busy(current_wt):
+                print(
+                    f"⚠️  Warning: Worktree '{current_wt}' is busy. "
+                    f"Skipping detach for '{branch_name}'."
                 )
-
-                if (
-                    os.path.exists(
-                        os.path.join(current_wt, git_dir, "MERGE_HEAD")
-                    )
-                    or os.path.exists(
-                        os.path.join(current_wt, git_dir, "rebase-merge")
-                    )
-                    or os.path.exists(
-                        os.path.join(current_wt, git_dir, "rebase-apply")
-                    )
-                ):
-                    print(
-                        f"⚠️  Warning: Worktree '{current_wt}' is busy. "
-                        f"Skipping detach for '{branch_name}'."
-                    )
-                    failed_branches.add(branch_name)
-                    continue
-            except GitExecutionError:
-                pass
+                failed_branches.add(branch_name)
+                continue
 
             # Detach
             try:
@@ -200,7 +201,9 @@ def _detach_worktrees(
                 )
                 failed_branches.add(branch_name)
 
-    return detached_map, failed_branches
+    return WorktreeState(
+        detached_map=detached_map, failed_branches=failed_branches
+    )
 
 
 def _reattach_worktrees(
@@ -219,20 +222,19 @@ def _reattach_worktrees(
 @contextmanager
 def manage_worktrees(
     prefix: str = "", active: bool = True, repo_path: str = "."
-) -> Generator[Tuple[Dict[str, str], Set[str]], None, None]:
+) -> Generator[WorktreeState, None, None]:
     """Temporarily detaches branches in other worktrees during execution.
 
     Yields empty context if active=False to simplify conditional usage.
     """
-    detached_map = {}
-    failed_branches = set()
+    state = WorktreeState(detached_map={}, failed_branches=set())
     if active:
-        detached_map, failed_branches = _detach_worktrees(prefix, repo_path)
+        state = _detach_worktrees(prefix, repo_path)
     try:
-        yield detached_map, failed_branches
+        yield state
     finally:
         if active:
-            _reattach_worktrees(detached_map, repo_path)
+            _reattach_worktrees(state.detached_map, repo_path)
 
 
 def rebase_onto(

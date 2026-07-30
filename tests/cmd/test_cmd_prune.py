@@ -121,8 +121,10 @@ class TestCmdPrune(absltest.TestCase):
                 ):
                     self.fail("git branch -D called during dry run")
 
-    @mock.patch("git_scripts.cmd.prune_remote.run_cmd")
-    def test_execute_prune_remote_deletes_merged_branches(self, mock_run_cmd):
+    @mock.patch("git_scripts.cmd.prune_remote.subprocess_run")
+    def test_execute_prune_remote_deletes_merged_branches(
+        self, mock_subprocess_run
+    ):
         # Create some remote branches
         main_id = self.repo.revparse_single("main").id
         self.repo.references.create("refs/remotes/origin/main", main_id)
@@ -147,13 +149,14 @@ class TestCmdPrune(absltest.TestCase):
         self.assertTrue(result)
 
         # It should call git push origin --delete feat/1
-        mock_run_cmd.assert_any_call(
+        mock_subprocess_run.assert_any_call(
             ["git", "push", "origin", "--delete", "feat/1"],
             cwd=self.repo_helper.path,
+            check=True,
         )
 
-    @mock.patch("git_scripts.cmd.prune_remote.run_cmd")
-    def test_execute_prune_remote_dry_run(self, mock_run_cmd):
+    @mock.patch("git_scripts.cmd.prune_remote.subprocess_run")
+    def test_execute_prune_remote_dry_run(self, mock_subprocess_run):
         main_id = self.repo.revparse_single("main").id
         self.repo.references.create("refs/remotes/origin/main", main_id)
         self.repo.references.create("refs/remotes/origin/feat/1", main_id)
@@ -166,7 +169,55 @@ class TestCmdPrune(absltest.TestCase):
             )
         self.assertTrue(result)
 
-        for call in mock_run_cmd.call_args_list:
+        for call in mock_subprocess_run.call_args_list:
             args, kwargs = call
             if args and args[0][0] == "git" and args[0][1] == "push":
                 self.fail("git push called during dry run")
+
+    @mock.patch("git_scripts.cmd.prune_remote.subprocess_run")
+    def test_execute_prune_remote_with_also_prune_no_local(
+        self, mock_subprocess_run
+    ):
+        main_id = self.repo.revparse_single("main").id
+        self.repo.references.create("refs/remotes/origin/main", main_id)
+
+        # Create unmerged remote branch that has no matching local branch
+        self.repo_helper.checkout("feat/orphaned", create=True)
+        self.repo_helper.commit("orphaned", "o.txt", "o")
+        orphaned_id = self.repo.revparse_single("feat/orphaned").id
+        self.repo.references.create(
+            "refs/remotes/origin/feat/orphaned", orphaned_id
+        )
+
+        # Now delete the local branch so it is truly orphaned
+        self.repo_helper.checkout("main")
+        self.repo.branches.delete("feat/orphaned")
+
+        # Create unmerged remote branch that DOES have a matching local branch
+        self.repo_helper.checkout("feat/active", create=True)
+        self.repo_helper.commit("active", "a.txt", "a")
+        active_id = self.repo.revparse_single("feat/active").id
+        self.repo.references.create(
+            "refs/remotes/origin/feat/active", active_id
+        )
+
+        with mock.patch(
+            "git_scripts.ui.UI.ask_choice", return_value="Delete all"
+        ):
+            result = execute_prune_remote(
+                self.repo_helper.path, prefix="feat/", also_prune_no_local=True
+            )
+        self.assertTrue(result)
+
+        # It should delete feat/orphaned because it lacks a local branch
+        mock_subprocess_run.assert_any_call(
+            ["git", "push", "origin", "--delete", "feat/orphaned"],
+            cwd=self.repo_helper.path,
+            check=True,
+        )
+
+        # It should NOT delete feat/active
+        for call in mock_subprocess_run.call_args_list:
+            args, kwargs = call
+            if args and args[0][0] == "git" and args[0][1] == "push":
+                self.assertNotIn("feat/active", args[0])

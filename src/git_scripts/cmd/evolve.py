@@ -111,6 +111,47 @@ def find_old_base(repo_path: str) -> Optional[str]:
     return _find_old_base_via_reflog(repo, current_branch_name)
 
 
+def _print_evolve_summary(ui, success_count: int, failed_log: list) -> bool:
+    summary_items = []
+
+    if failed_log:
+        summary_items.append(
+            "[bold red]⚠️  Failed (Manual Fix Needed):[/bold red]"
+        )
+        for entry in failed_log:
+            summary_items.append(
+                f"    [red]- {entry.replace(chr(10), chr(10) + '      ')}"
+                "[/red]"
+            )
+    else:
+        summary_items.append(
+            f"[bold green]✨  All Done! "
+            f"({success_count} stacks evolved)[/bold green]"
+        )
+
+    ui.print()
+    ui.print(
+        Panel(
+            Group(*summary_items),
+            title="[bold]EVOLVE SUMMARY[/bold]",
+            border_style="blue",
+            expand=False,
+        )
+    )
+
+    if failed_log:
+        ui.print(
+            "    [yellow]The repository has been reset to "
+            "clean state (per stack).[/yellow]"
+        )
+        ui.print(
+            "    [yellow]The failed stacks require "
+            "manual intervention.[/yellow]"
+        )
+        return False
+    return True
+
+
 def execute_evolve(
     repo_path: str,
     old_hash: Optional[str] = None,
@@ -210,44 +251,7 @@ def execute_evolve(
         ui,
     )
 
-    summary_items = []
-
-    if failed_log:
-        summary_items.append(
-            "[bold red]⚠️  Failed (Manual Fix Needed):[/bold red]"
-        )
-        for entry in failed_log:
-            summary_items.append(
-                f"    [red]- {entry.replace(chr(10), chr(10) + '      ')}"
-                "[/red]"
-            )
-    else:
-        summary_items.append(
-            f"[bold green]✨  All Done! "
-            f"({success_count} stacks evolved)[/bold green]"
-        )
-
-    ui.print()
-    ui.print(
-        Panel(
-            Group(*summary_items),
-            title="[bold]EVOLVE SUMMARY[/bold]",
-            border_style="blue",
-            expand=False,
-        )
-    )
-
-    if failed_log:
-        ui.print(
-            "    [yellow]The repository has been reset to "
-            "clean state (per stack).[/yellow]"
-        )
-        ui.print(
-            "    [yellow]The failed stacks require "
-            "manual intervention.[/yellow]"
-        )
-        return False
-    return True
+    return _print_evolve_summary(ui, success_count, failed_log)
 
 
 def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
@@ -291,10 +295,8 @@ def _evolve_stacks(
     success_count = 0
     failed_log = []
 
-    with manage_worktrees(active=True, repo_path=repo_path) as (
-        detached_map,
-        failed_branches,
-    ):
+    with manage_worktrees(active=True, repo_path=repo_path) as wt_state:
+        failed_branches = wt_state.failed_branches
         for tip in analyzer.tips:
             ui.print(f"🔗 Reconnecting stack '{tip}'...")
             repo = get_repo(repo_path)

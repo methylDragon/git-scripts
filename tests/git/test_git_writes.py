@@ -22,9 +22,11 @@ class TestGitWrites(absltest.TestCase):
         # Test Context Manager
         with manage_worktrees(
             "test-chain-", active=True, repo_path=self.repo_helper.path
-        ) as (detached_map, failed_branches):
-            self.assertIn(worktree_path, detached_map)
-            self.assertEqual(detached_map[worktree_path], "test-chain-a")
+        ) as wt_state:
+            self.assertIn(worktree_path, wt_state.detached_map)
+            self.assertEqual(
+                wt_state.detached_map[worktree_path], "test-chain-a"
+            )
             # Ensure branch is detached
             out = run_cmd(
                 ["git", "branch", "--show-current"], cwd=worktree_path

@@ -71,6 +71,21 @@ class TestGitReads(absltest.TestCase):
         # Now feature/cherry should be obsolete (Patch-ID match)
         self.assertTrue(is_obsolete(self.repo, cherry_commit_hash, "main"))
 
+    def test_is_obsolete_returns_true_for_squash_merge(self):
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("feature/squash", create=True)
+        self.repo_helper.commit("c1", "file1.txt", "1")
+        self.repo_helper.commit("c2", "file2.txt", "2")
+        squash_commit_hash = self.repo.revparse_single("feature/squash").id
+
+        self.repo_helper.checkout("main")
+        run_git(
+            ["merge", "--squash", "feature/squash"], cwd=self.repo_helper.path
+        )
+        self.repo_helper.commit("squashed c1 and c2", "none.txt", "none")
+
+        self.assertTrue(is_obsolete(self.repo, squash_commit_hash, "main"))
+
     def test_find_cut_point_returns_latest_merged_ancestor(self):
         # main-base -> test-chain-a -> test-chain-a-b -> test-chain-a-b-c
         # If test-chain-a is merged to main, cut point is a.

@@ -24,17 +24,6 @@ def rebase_prefix(
     auto_delete: Annotated[
         bool, typer.Option("--auto-delete", help="Auto delete merged branches")
     ] = False,
-    obsolete_search_depth: Annotated[
-        int,
-        typer.Option(
-            "--obsolete-search-depth",
-            help=(
-                "Commits to traverse back on the target branch to "
-                "detect squash merges or cherry-picks. Increase this "
-                "if your target branch moves very quickly."
-            ),
-        ),
-    ] = 100,
     plain: Annotated[
         bool,
         typer.Option(
@@ -58,7 +47,6 @@ def rebase_prefix(
         target=target,
         all_worktrees=all_worktrees,
         auto_delete=auto_delete,
-        search_depth=obsolete_search_depth,
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)
@@ -175,17 +163,13 @@ def prune_remote(
         bool,
         typer.Option("-n", "--dry-run", help="Run without making changes"),
     ] = False,
-    obsolete_search_depth: Annotated[
-        int,
+    also_prune_no_local: Annotated[
+        bool,
         typer.Option(
-            "--obsolete-search-depth",
-            help=(
-                "Commits to traverse back on the target branch to "
-                "detect squash merges or cherry-picks to find obsolete "
-                "stacks. Increase this if your target branch moves quickly."
-            ),
+            "--also-prune-no-local",
+            help="Also prune remotes lacking a matching local branch",
         ),
-    ] = 100,
+    ] = False,
     plain: Annotated[
         bool,
         typer.Option(
@@ -208,7 +192,7 @@ def prune_remote(
         prefix=prefix,
         target=target,
         dry_run=dry_run,
-        search_depth=obsolete_search_depth,
+        also_prune_no_local=also_prune_no_local,
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)

@@ -4,14 +4,15 @@ import subprocess
 from typing import Dict, List, Optional, Tuple
 
 import pygit2
-from rich.progress import Progress
 
+from git_scripts.git.parallel import analyze_branches_in_parallel
 from git_scripts.git.reads import (
     find_cut_point,
     find_sync_point,
     find_tips,
     is_obsolete,
 )
+from git_scripts.models import TopologyAnalysisResult
 
 
 class TopologyAnalyzer:
@@ -45,7 +46,7 @@ class TopologyAnalyzer:
         self.tips: List[str] = find_tips(self.repo, self.branches)
 
         # Cache for expensive analysis
-        self._analysis_cache: Dict[str, Dict[str, any]] = {}
+        self._analysis_cache: Dict[str, TopologyAnalysisResult] = {}
 
     def get_sync_point(self, branch: str) -> Optional[Tuple[str, str, str]]:
         """Finds closest ancestor of the branch that has already been rebased.
@@ -57,15 +58,12 @@ class TopologyAnalyzer:
             self.repo, branch, self.branches, self.initial_ref_map
         )
 
-    def analyze_obsolescence(
-        self, target: str, search_depth: int = 100, ui=None
-    ) -> None:
+    def analyze_obsolescence(self, target: str, ui=None) -> None:
         """Precomputes obsolescence and cut points for all stack tips.
 
         Evaluates each branch tip against the upstream target branch history
-        (up to search_depth commits) to check if its patches were squashed or
-        merged. The results are cached for fast subsequent retrieval during
-        batch stack operations.
+        to check if its patches were squashed or merged. The results are
+        cached for fast subsequent retrieval during batch stack operations.
         """
 
         def _analyze(b_name: str):
@@ -73,7 +71,7 @@ class TopologyAnalyzer:
             try:
                 commit_id = local_repo.revparse_single(b_name).id
             except (KeyError, ValueError, pygit2.GitError):
-                return b_name, False, None
+                return False, None
 
             # If the branch has no unique commits (it is an ancestor of
             # target), we shouldn't skip it as obsolete; we want
@@ -95,47 +93,29 @@ class TopologyAnalyzer:
                 obs = False
                 cut = None
             else:
-                obs = is_obsolete(
-                    local_repo,
-                    commit_id,
-                    target,
-                    search_depth=search_depth,
-                )
+                obs = is_obsolete(local_repo, commit_id, target)
                 cut = None
                 if not obs:
-                    cut = find_cut_point(
-                        local_repo,
-                        str(commit_id),
-                        target,
-                        search_depth=search_depth,
-                    )
-            return b_name, obs, cut
+                    cut = find_cut_point(local_repo, str(commit_id), target)
+            return obs, cut
 
-        if ui and not ui.plain:
-            with Progress(console=ui.console, transient=True) as progress:
-                task = progress.add_task(
-                    "[cyan]Analyzing topology...", total=len(self.tips)
-                )
-                for b in self.tips:
-                    progress.update(
-                        task, description=f"[cyan]Analyzing topology: {b}"
-                    )
-                    b_name, obs, cut = _analyze(b)
-                    self._analysis_cache[b_name] = {
-                        "is_obs": obs,
-                        "cut_point": cut,
-                    }
-                    progress.advance(task)
-        else:
-            for b in self.tips:
-                b_name, obs, cut = _analyze(b)
-                self._analysis_cache[b_name] = {
-                    "is_obs": obs,
-                    "cut_point": cut,
-                }
+        results = analyze_branches_in_parallel(
+            repo_path=self.repo_path,
+            branches=self.tips,
+            target_ref=target,
+            analyze_fn=_analyze,
+            description="Analyzing topology",
+            ui=ui,
+        )
 
-    def get_analysis(self, branch: str) -> Dict[str, any]:
+        for b_name, (obs, cut) in results.items():
+            self._analysis_cache[b_name] = TopologyAnalysisResult(
+                is_obsolete=obs,
+                cut_point=cut,
+            )
+
+    def get_analysis(self, branch: str) -> TopologyAnalysisResult:
         """Gets the precomputed analysis for a tip branch."""
         return self._analysis_cache.get(
-            branch, {"is_obs": False, "cut_point": None}
+            branch, TopologyAnalysisResult(is_obsolete=False, cut_point=None)
         )

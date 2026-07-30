@@ -41,10 +41,10 @@ You can invoke these scripts just like native Git commands:
 
 | Command | Description |
 | :--- | :--- |
-| **`git rebase-prefix <prefix> [target] [--all-worktrees] [--auto-delete] [--obsolete-search-depth <int>]`** | **Batch Update.** Rebases all stacks matching `prefix` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream. |
+| **`git rebase-prefix <prefix> [target] [--all-worktrees] [--auto-delete]`** | **Batch Update.** Rebases all stacks matching `prefix` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream. |
 | **`git evolve [old_hash]`** | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted. |
 | **`git push-prefix <prefix> [opts]`** | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git. |
-| **`git prune-remote-prefix <prefix> [target] [-n/--dry-run] [--obsolete-search-depth <int>]`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `target` (default: `main`). |
+| **`git prune-remote-prefix <prefix> [target] [-n/--dry-run] [--prune-no-local]`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `target` (default: `main`). Use `--prune-no-local` to also delete branches lacking a local counterpart. |
 | **`git prune-local-branches [-n/--dry-run]`** | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone. |
 
 > **Note:** All commands support `--plain` (disables rich UI formatting) and `-y/--yes` (bypasses confirmation prompts).
