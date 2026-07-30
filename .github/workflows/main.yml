@@ -20,3 +20,7 @@ jobs:
         cache: true
     - name: Run Python tests
       run: pixi run test
+    - name: Coveralls GitHub Action
+      uses: coverallsapp/github-action@v2.3.0
+      with:
+        file: coverage.xml
