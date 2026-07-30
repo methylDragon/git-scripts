@@ -118,8 +118,8 @@ def execute_push_stack(
         if ref.startswith("refs/heads/")
     }
 
-    # We want to stop at `target`, so target MUST be in pool so
-    # `get_parent_branch` can find it. We will NOT add `target` to `stack`.
+    # Stop at `target`. Target MUST be in pool for `get_parent_branch` to
+    # find it. `target` is not added to `stack`.
     pool.add(target)
 
     # Determine the linear stack

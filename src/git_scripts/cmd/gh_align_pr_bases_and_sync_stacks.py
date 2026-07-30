@@ -189,6 +189,47 @@ def calculate_pr_actions(
     return edits, creates
 
 
+def _group_into_stacks(
+    repo: pygit2.Repository, branches: set[str]
+) -> dict[str, list[str]]:
+    """Groups branches into distinct topological stacks."""
+    parent_map = {b: get_parent_branch(repo, b, branches) for b in branches}
+    parents = set(parent_map.values()) - {None}
+    tips = [b for b in branches if b not in parents]
+
+    stacks = {}
+    for tip in sorted(tips):
+        curr: str | None = tip
+        stack = []
+        while curr and curr in branches:
+            stack.append(curr)
+            curr = parent_map.get(curr)
+        stacks[tip] = stack[::-1]  # from bottom to top
+    return stacks
+
+
+def _handle_interactive_selection(
+    repo: pygit2.Repository, branches: set[str], ui: UI
+) -> set[str]:
+    stacks = _group_into_stacks(repo, branches)
+    choices = []
+    for tip, stack in stacks.items():
+        label = " ➔ ".join(stack)
+        choices.append(questionary.Choice(title=label, value=tip))
+
+    selected_tips = ui.ask_checkbox(
+        "Select stacks to align (Space to toggle, Enter to confirm):",
+        choices=choices,
+    )
+    if not selected_tips:
+        return set()
+
+    final_branches = set()
+    for tip in selected_tips:
+        final_branches.update(stacks[tip])
+    return final_branches
+
+
 def _get_selected_branches(
     repo: pygit2.Repository,
     prefix: str | None,
@@ -196,6 +237,7 @@ def _get_selected_branches(
     all_matching: bool,
     ui: UI,
     target: str,
+    interactive: bool = False,
 ) -> set[str] | None:
     all_local_branches = {
         ref[11:] for ref in repo.references if ref.startswith("refs/heads/")
@@ -216,6 +258,7 @@ def _get_selected_branches(
             head in matched
             and not current_stack_only
             and not all_matching
+            and not interactive
             and not ui.auto_yes
         ):
             action = ui.ask_choice(
@@ -223,6 +266,7 @@ def _get_selected_branches(
                 choices=[
                     "Current stack only",
                     "All matching prefix branches",
+                    "Select which stacks to align",
                     "Cancel",
                 ],
                 default="Current stack only",
@@ -231,8 +275,13 @@ def _get_selected_branches(
                 return set()
             elif action == "Current stack only":
                 current_stack_only = True
+            elif action == "Select which stacks to align":
+                interactive = True
             else:
                 all_matching = True
+
+        if interactive:
+            return _handle_interactive_selection(repo, matched, ui)
 
         if current_stack_only:
             if head is None or head not in matched:
@@ -245,6 +294,9 @@ def _get_selected_branches(
         else:
             return matched
     else:
+        if interactive:
+            return _handle_interactive_selection(repo, all_local_branches, ui)
+
         if head == target or not head:
             ui.print(f"❌  Cannot align: HEAD is on {head or 'detached'}.")
             return None
@@ -419,10 +471,12 @@ def _print_final_summary(
         final_summary += (
             f"✅  Created [green]{len(creates)}[/green] new {pr_plural}:\n"
         )
-        for action in creates:
-            final_summary += f"      - [yellow]{action.branch}[/yellow]\n"
-            if getattr(action, "url", None):
-                final_summary += f"        [dim]🔗  {action.url}[/dim]\n"
+        for create_action in creates:
+            b = create_action.branch
+            url = getattr(create_action, "url", None)
+            final_summary += f"      - [yellow]{b}[/yellow]\n"
+            if url:
+                final_summary += f"        [dim]🔗  {url}[/dim]\n"
 
     if stack_branches:
         final_summary += (
@@ -609,6 +663,7 @@ def execute_align_pr_bases_and_sync_stacks(
     current_stack_only: bool = False,
     all_matching: bool = False,
     create_missing: bool = False,
+    interactive: bool = False,
     ui: UI | None = None,
 ) -> bool:
     """Aligns GitHub PR bases with local topology."""
@@ -620,7 +675,7 @@ def execute_align_pr_bases_and_sync_stacks(
 
     repo = get_repo(repo_path)
     selected_branches = _get_selected_branches(
-        repo, prefix, current_stack_only, all_matching, ui, target
+        repo, prefix, current_stack_only, all_matching, ui, target, interactive
     )
 
     if selected_branches is None:

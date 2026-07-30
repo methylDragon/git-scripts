@@ -262,6 +262,14 @@ def gh_align_pr_bases_and_sync_stacks(
         bool,
         typer.Option("--all", help="Align all branches matching the prefix"),
     ] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive",
+            "-i",
+            help="Interactively select which stacks/branches to align",
+        ),
+    ] = False,
     plain: Annotated[
         bool,
         typer.Option(
@@ -285,6 +293,7 @@ def gh_align_pr_bases_and_sync_stacks(
         target=target,
         current_stack_only=current,
         all_matching=all_matching,
+        interactive=interactive,
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)

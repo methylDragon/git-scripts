@@ -45,8 +45,7 @@ def execute_push_prefix(
     repo = pygit2.Repository(repo_path)
 
     ui.print("[cyan]🔄  Fetching origin...[/cyan]")
-    # We could do a subprocess fetch here, or use pygit2.
-    # We will just shell out for fetch as it handles auth natively.
+    # Shell out for fetch to handle auth natively
     try:
         run_cmd(["git", "fetch", "origin"], cwd=repo_path)
     except GitExecutionError:

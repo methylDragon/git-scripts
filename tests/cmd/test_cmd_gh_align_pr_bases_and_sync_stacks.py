@@ -10,6 +10,7 @@ from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
     _execute_creates,
     _execute_edits,
     _get_selected_branches,
+    _group_into_stacks,
     _print_branch_summary,
     _print_final_summary,
     _prompt_creates,
@@ -238,8 +239,68 @@ def test_get_selected_branches():
         all_matching=False,
         ui=ui,
         target="main",
+        interactive=False,
     )
     assert res is not None
+
+
+@patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+def test_execute_align_pr_bases_and_sync_stacks_interactive(
+    mock_repo,
+):
+    ui = MagicMock()
+    # Mock ask_checkbox to select a specific tip
+    ui.ask_checkbox.return_value = ["b2"]
+    ui.auto_yes = False
+
+    repo = MagicMock()
+    repo.references = ["refs/heads/b1", "refs/heads/b2", "refs/heads/main"]
+    mock_repo.return_value = repo
+    repo.head.shorthand = "b2"
+
+    with patch(
+        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_branch",
+        side_effect=lambda r, b, cand: (
+            "b1" if b == "b2" else ("main" if b == "b1" else None)
+        ),
+    ):
+        with patch(
+            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks._verify_topology",
+            return_value=(False, None, None),
+        ):
+            with patch(
+                "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_installed",
+                return_value=True,
+            ):
+                # Run with interactive=True
+                execute_align_pr_bases_and_sync_stacks(
+                    ".", interactive=True, ui=ui
+                )
+
+                # The UI should have been asked for a checkbox
+                ui.ask_checkbox.assert_called_once()
+                # Ensure the choices were populated correctly
+                args, kwargs = ui.ask_checkbox.call_args
+                assert "choices" in kwargs
+
+
+def test_group_into_stacks():
+    repo = MagicMock()
+
+    # Mock parent map: b1 -> main, b2 -> b1, c1 -> main
+    def fake_get_parent(r, b, pool):
+        return {"b1": "main", "b2": "b1", "c1": "main"}.get(b)
+
+    with patch(
+        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_branch",
+        side_effect=fake_get_parent,
+    ):
+        stacks = _group_into_stacks(repo, {"b1", "b2", "c1"})
+        assert "b2" in stacks
+        assert "c1" in stacks
+        assert "b1" not in stacks
+        assert stacks["b2"] == ["b1", "b2"]
+        assert stacks["c1"] == ["c1"]
 
 
 def test_print_branch_summary():
