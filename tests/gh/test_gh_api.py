@@ -36,12 +36,17 @@ def test_check_gh_installed_not_found(mock_run):
 @patch("subprocess.run")
 def test_get_open_prs_success(mock_run):
     mock_run.return_value.stdout = """[
-        {"headRefName": "feat-a", "baseRefName": "main", "url": "https://github.com/pr/1"}
+      {
+        "headRefName": "feat-a",
+        "baseRefName": "main",
+        "url": "https://github.com/pr/1", "number": 1
+      }
     ]"""
     result = get_open_prs(".")
     assert "feat-a" in result
     assert result["feat-a"]["base"] == "main"
     assert result["feat-a"]["url"] == "https://github.com/pr/1"
+    assert result["feat-a"]["number"] == "1"
 
 
 @patch("subprocess.run")

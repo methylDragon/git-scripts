@@ -102,7 +102,7 @@ def gh_stack_unstack(
 
 
 def get_open_prs(repo_path: str) -> dict[str, dict[str, str]]:
-    """Returns a dict mapping headRefName to baseRefName and url for PRs."""
+    """Returns a dict mapping headRefName to baseRefName, url, and number."""
     try:
         stdout = run_gh_cmd(
             [
@@ -112,7 +112,7 @@ def get_open_prs(repo_path: str) -> dict[str, dict[str, str]]:
                 "--state",
                 "open",
                 "--json",
-                "headRefName,baseRefName,url",
+                "headRefName,baseRefName,url,number",
                 "--limit",
                 "1000",
             ],
@@ -120,16 +120,38 @@ def get_open_prs(repo_path: str) -> dict[str, dict[str, str]]:
         )
         data = json.loads(stdout)
         return {
-            pr["headRefName"]: {"base": pr["baseRefName"], "url": pr["url"]}
+            pr["headRefName"]: {
+                "base": pr["baseRefName"],
+                "url": pr["url"],
+                "number": str(pr["number"]),
+            }
             for pr in data
         }
     except (GhExecutionError, json.JSONDecodeError):
         return {}
 
 
-def gh_pr_edit(repo_path: str, branch: str, new_base: str) -> None:
+def gh_pr_edit(
+    repo_path: str, branch: str, new_base: str, pr_number: str | None = None
+) -> None:
     """Edits the base branch of an existing PR."""
     try:
+        if pr_number:
+            run_gh_cmd(
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "PATCH",
+                    f"repos/{{owner}}/{{repo}}/pulls/{pr_number}",
+                    "-f",
+                    f"base={new_base}",
+                ],
+                cwd=repo_path,
+            )
+            return
+
+        # Fallback to standard CLI if PR number is missing
         run_gh_cmd(
             ["gh", "pr", "edit", branch, "--base", new_base],
             cwd=repo_path,

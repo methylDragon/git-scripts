@@ -39,6 +39,7 @@ class PrEditAction:
     new_base: str
     reason: str
     url: str
+    pr_number: str | None = None
 
 
 @dataclass
@@ -160,6 +161,7 @@ def calculate_pr_actions(
 
         current_base = pr_state[branch]["base"]
         pr_url = pr_state[branch]["url"]
+        pr_number = pr_state[branch].get("number")
 
         curr_ancestor = parent_map.get(branch)
         skipped = False
@@ -183,6 +185,7 @@ def calculate_pr_actions(
                     new_base=expected_base,
                     reason=reason,
                     url=pr_url,
+                    pr_number=pr_number,
                 )
             )
 
@@ -398,7 +401,12 @@ def _execute_edits(edits: list[PrEditAction], repo_path: str, ui: UI) -> bool:
         ui.print("\n🚀  Updating PR bases via GitHub API...")
         for action in edits:
             try:
-                gh_pr_edit(repo_path, action.branch, action.new_base)
+                gh_pr_edit(
+                    repo_path,
+                    action.branch,
+                    action.new_base,
+                    action.pr_number,
+                )
                 ui.print(
                     f"  ✅  Updated [yellow]{action.branch}[/yellow] ➔ "
                     f"[green]{action.new_base}[/green]"
