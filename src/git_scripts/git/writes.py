@@ -234,8 +234,88 @@ def manage_worktrees(
             _reattach_worktrees(state.detached_map, repo_path)
 
 
+def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
+    """Handles git rebase conflicts by prompting the user for resolution."""
+    if not ui:
+        try:
+            run_cmd(["git", "rebase", "--abort"], cwd=repo_path, check=False)
+        except GitExecutionError:
+            pass
+        raise e
+
+    err_msg = str(e)
+    if "Error:" in err_msg:
+        err_msg = err_msg.split("Error:", 1)[1].strip()
+    ui.print(f"    [red]❌  Conflict or error.\n{err_msg}[/red]")
+
+    while True:
+        ans = ui.ask_choice(
+            "How would you like to handle this?",
+            choices=[
+                "Abort rebase and rollback",
+                "Resolve manually, then continue",
+                "Abort script without rollback",
+            ],
+            default="Abort rebase and rollback",
+        )
+
+        match ans:
+            case "Abort script without rollback":
+                import sys
+
+                ui.print(
+                    "    [yellow]Leaving repository in current state "
+                    "(rebase in progress).[/yellow]"
+                )
+                sys.exit(1)
+            case "Resolve manually, then continue":
+                ui.print(
+                    "    [yellow]Please resolve the conflicts in another "
+                    "terminal. (DO NOT run `git rebase --continue`)[/yellow]"
+                )
+                ui.print(
+                    "    [cyan]Press Enter here when the conflicts "
+                    "are completely resolved...[/cyan]"
+                )
+                input()
+
+                try:
+                    run_cmd(
+                        [
+                            "git",
+                            "-c",
+                            "core.editor=true",
+                            "rebase",
+                            "--continue",
+                        ],
+                        cwd=repo_path,
+                    )
+                    ui.print("    ✅  Rebase finished. Continuing script...")
+                    return True
+                except GitExecutionError:
+                    ui.print(
+                        "    [red]⚠️  Rebase could not continue. "
+                        "There may still be unresolved conflicts.[/red]"
+                    )
+                    continue
+            case _:
+                try:
+                    run_cmd(
+                        ["git", "rebase", "--abort"],
+                        cwd=repo_path,
+                        check=False,
+                    )
+                except GitExecutionError:
+                    pass
+                raise e
+
+
 def rebase_onto(
-    onto_hash: str, old_base_hash: str, branch: str, repo_path: str = "."
+    onto_hash: str,
+    old_base_hash: str,
+    branch: str,
+    repo_path: str = ".",
+    ui=None,
 ) -> bool:
     """Executes git rebase --onto with --update-refs to port a stack."""
     try:
@@ -254,14 +334,15 @@ def rebase_onto(
         )
         return True
     except GitExecutionError as e:
-        try:
-            run_cmd(["git", "rebase", "--abort"], cwd=repo_path, check=False)
-        except GitExecutionError:
-            pass
-        raise e
+        return _handle_rebase_conflict(e, repo_path, ui)
 
 
-def rebase_standard(target: str, branch: str, repo_path: str = ".") -> bool:
+def rebase_standard(
+    target: str,
+    branch: str,
+    repo_path: str = ".",
+    ui=None,
+) -> bool:
     """Executes a standard git rebase onto the target branch."""
     try:
         run_cmd(
@@ -277,11 +358,7 @@ def rebase_standard(target: str, branch: str, repo_path: str = ".") -> bool:
         )
         return True
     except GitExecutionError as e:
-        try:
-            run_cmd(["git", "rebase", "--abort"], cwd=repo_path, check=False)
-        except GitExecutionError:
-            pass
-        raise e
+        return _handle_rebase_conflict(e, repo_path, ui)
 
 
 def push_branches(

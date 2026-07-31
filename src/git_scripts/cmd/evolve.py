@@ -10,7 +10,11 @@ from git_scripts.git.reads import (
     get_stack_branches,
 )
 from git_scripts.git.topology import TopologyAnalyzer
-from git_scripts.git.writes import manage_worktrees, rebase_onto
+from git_scripts.git.writes import (
+    GitExecutionError,
+    manage_worktrees,
+    rebase_onto,
+)
 from git_scripts.ui import UI
 
 
@@ -68,7 +72,7 @@ def _find_old_base_via_reflog(repo, current_branch_name) -> str | None:
             except (KeyError, ValueError):
                 pass
 
-        return str(log[0].oid_old)
+        return str(list(log)[0].oid_old)
     except (KeyError, IndexError, pygit2.GitError):
         pass
     return None
@@ -249,6 +253,14 @@ def execute_evolve(
         ui,
     )
 
+    if current_branch_name:
+        try:
+            from git_scripts.git.writes import run_cmd
+
+            run_cmd(["git", "checkout", current_branch_name], cwd=repo_path)
+        except GitExecutionError:
+            pass
+
     return _print_evolve_summary(ui, success_count, failed_log)
 
 
@@ -315,20 +327,27 @@ def _evolve_stacks(
 
             sync_point = analyzer.get_sync_point(tip)
 
-            rebase_ok = False
-            if sync_point:
-                sync_branch, sync_old_hash, sync_new_hash = sync_point
-                ui.print(
-                    f"    ✨  Detected shared history! "
-                    f"Linking onto updated '{sync_branch}'..."
-                )
-                rebase_ok = rebase_onto(
-                    sync_new_hash, sync_old_hash, tip, repo_path=repo_path
-                )
-            else:
-                rebase_ok = rebase_onto(
-                    new_hash, old_hash, tip, repo_path=repo_path
-                )
+            try:
+                rebase_ok = False
+                if sync_point:
+                    sync_branch, sync_old_hash, sync_new_hash = sync_point
+                    ui.print(
+                        f"    ✨  Detected shared history! "
+                        f"Linking onto updated '{sync_branch}'..."
+                    )
+                    rebase_ok = rebase_onto(
+                        sync_new_hash,
+                        sync_old_hash,
+                        tip,
+                        repo_path=repo_path,
+                        ui=ui,
+                    )
+                else:
+                    rebase_ok = rebase_onto(
+                        new_hash, old_hash, tip, repo_path=repo_path, ui=ui
+                    )
+            except GitExecutionError:
+                rebase_ok = False
 
             if rebase_ok:
                 ui.print("    ✅  Success.")

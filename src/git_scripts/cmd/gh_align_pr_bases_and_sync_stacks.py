@@ -403,10 +403,11 @@ def _execute_edits(edits: list[PrEditAction], repo_path: str, ui: UI) -> bool:
                     f"  ✅  Updated [yellow]{action.branch}[/yellow] ➔ "
                     f"[green]{action.new_base}[/green]"
                 )
-            except GhExecutionError:
-                ui.print(
+            except GhExecutionError as e:
+                msg = (
                     f"  ❌  Failed to update [yellow]{action.branch}[/yellow]"
                 )
+                ui.print(f"{msg}: {e}")
                 success = False
     return success
 

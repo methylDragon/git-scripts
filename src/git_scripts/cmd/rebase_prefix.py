@@ -356,13 +356,16 @@ def _apply_rebase_strategy(res, branch, target, repo_path, ui) -> bool:
                     res.sync_old_hash,
                     branch,
                     repo_path=repo_path,
+                    ui=ui,
                 )
             case RebaseAction.REBASE_ONTO_CUT if res.cut_point:
                 return rebase_onto(
-                    target, res.cut_point, branch, repo_path=repo_path
+                    target, res.cut_point, branch, repo_path=repo_path, ui=ui
                 )
             case RebaseAction.REBASE_STANDARD:
-                return rebase_standard(target, branch, repo_path=repo_path)
+                return rebase_standard(
+                    target, branch, repo_path=repo_path, ui=ui
+                )
             case _:
                 return False
     except GitExecutionError as e:

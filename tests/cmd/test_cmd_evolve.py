@@ -32,26 +32,21 @@ class TestCmdEvolve(absltest.TestCase):
         self.old_hash = str(old_head)
         self.new_hash = str(self.repo.revparse_single("HEAD").id)
 
-    def test_execute_evolve_rebases_descendants_given_explicit_hash(self):
-        # Find test-chain-a-b and a-b-c and rebase them onto test-chain-a.
+    def test_execute_evolve_restores_stack_when_given_explicit_old_hash(self):
         ui = UI(auto_yes=True)
         result = execute_evolve(
             self.repo_helper.path, old_hash=self.old_hash, ui=ui
         )
         self.assertTrue(result)
 
-        # Check that test-chain-a-b-c is now based on the new test-chain-a
         c_commit = self.repo.revparse_single("test-chain-a-b-c")
         a_commit = self.repo.revparse_single("test-chain-a")
-
-        # a_commit should be an ancestor of c_commit
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
 
-    def test_execute_evolve_rebases_descendants_using_reflog_heuristic(self):
-        # Do not mock find_old_base. Let it naturally find the old base!
-        # Because we just did a commit in setUp() while on test-chain-a,
-        # the reflog HEAD@{1} naturally points to old_hash before the commit.
+    def test_execute_evolve_restores_stack_by_finding_old_base_via_reflog(
+        self,
+    ):
         ui = UI(auto_yes=True)
         result = execute_evolve(self.repo_helper.path, old_hash=None, ui=ui)
         self.assertTrue(result)
@@ -61,7 +56,9 @@ class TestCmdEvolve(absltest.TestCase):
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
 
-    def test_execute_evolve_rebases_descendants_using_tracking_branch(self):
+    def test_execute_evolve_restores_stack_via_remote_tracking_branch(
+        self,
+    ):
         # Simulate a scenario where the reflog is wiped, but the remote
         # tracking branch still points to the old hash.
 
@@ -102,3 +99,91 @@ class TestCmdEvolve(absltest.TestCase):
         a_commit = self.repo.revparse_single("test-chain-a")
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
+
+    def test_execute_evolve_fails_when_user_aborts_conflict(
+        self,
+    ):
+        self.repo_helper.checkout("test-chain-a-b")
+        self.repo_helper.commit("conflict in b", "a.txt", "conflict")
+
+        self.repo_helper.checkout("test-chain-a")
+
+        from unittest.mock import MagicMock
+
+        mock_ui = MagicMock()
+        mock_ui.confirm.return_value = True
+        mock_ui.ask_choice.return_value = "Abort rebase and rollback"
+
+        result = execute_evolve(
+            self.repo_helper.path, old_hash=self.old_hash, ui=mock_ui
+        )
+        self.assertFalse(result)
+
+    def test_execute_evolve_returns_false_when_given_invalid_old_hash(self):
+        ui = UI(auto_yes=True)
+        result = execute_evolve(
+            self.repo_helper.path, old_hash="invalidhash", ui=ui
+        )
+        self.assertFalse(result)
+
+    def test_execute_evolve_returns_false_when_user_declines_confirmation(
+        self,
+    ):
+        from unittest.mock import MagicMock
+
+        mock_ui = MagicMock()
+        mock_ui.confirm.return_value = False
+
+        result = execute_evolve(
+            self.repo_helper.path, old_hash=self.old_hash, ui=mock_ui
+        )
+        self.assertFalse(result)
+
+    def test_execute_evolve_fails_when_default_ui_declines(
+        self,
+    ):
+        from unittest.mock import patch
+
+        with patch("git_scripts.cmd.evolve.UI") as mock_ui_cls:
+            mock_ui = mock_ui_cls.return_value
+            mock_ui.confirm.return_value = False
+            result = execute_evolve(
+                self.repo_helper.path, old_hash=self.old_hash, ui=None
+            )
+            self.assertFalse(result)
+
+    def test_execute_evolve_returns_true_when_no_branches_are_displaced(self):
+        ui = UI(auto_yes=True)
+        result = execute_evolve(
+            self.repo_helper.path, old_hash=self.new_hash, ui=ui
+        )
+        self.assertTrue(result)
+
+    def test_execute_evolve_fails_when_old_base_undetected(
+        self,
+    ):
+        ui = UI(auto_yes=True)
+        run_git(
+            ["reflog", "expire", "--expire=now", "--all"],
+            cwd=self.repo_helper.path,
+        )
+        result = execute_evolve(self.repo_helper.path, old_hash=None, ui=ui)
+        self.assertFalse(result)
+
+    def test_execute_evolve_returns_false_when_worktree_is_busy(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_ui = MagicMock()
+        mock_ui.confirm.return_value = True
+
+        with patch("git_scripts.cmd.evolve.manage_worktrees") as mock_mw:
+            mock_wt_state = MagicMock()
+            mock_wt_state.failed_branches = {"test-chain-a-b-c"}
+            mock_mw.return_value.__enter__.return_value = mock_wt_state
+
+            result = execute_evolve(
+                self.repo_helper.path, old_hash=self.old_hash, ui=mock_ui
+            )
+            self.assertFalse(
+                result
+            )  # It should fail because it skips and logs failure
