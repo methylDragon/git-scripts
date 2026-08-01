@@ -141,7 +141,9 @@ def calculate_pr_actions(
     creates = []
 
     # Cache the template read once per run
-    pr_template = _get_pr_template(repo.path)
+    # Use repo.workdir because repo.path returns the .git/ directory
+    workdir = repo.workdir if repo.workdir else repo.path.replace(".git/", "")
+    pr_template = _get_pr_template(workdir)
 
     for branch in branches:
         if branch not in pr_state:

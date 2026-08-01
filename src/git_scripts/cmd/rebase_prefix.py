@@ -245,6 +245,34 @@ def _determine_rebase_strategy(
     )
 
 
+def _sync_colocated_branches(
+    repo: pygit2.Repository,
+    branch: str,
+    stack_refs: set[str],
+    analyzer: TopologyAnalyzer,
+    repo_path: str,
+) -> None:
+    """Fast-forward co-located alias branches sharing the exact same commit."""
+    new_tip_commit = repo.revparse_single(branch)
+    analyzer_old_commit_hash = analyzer.initial_ref_map.get(branch)
+    new_id_str = str(new_tip_commit.id)
+
+    if not analyzer_old_commit_hash or new_id_str == analyzer_old_commit_hash:
+        return
+
+    for ref in stack_refs:
+        if ref == branch:
+            continue
+        ref_old_hash = analyzer.initial_ref_map.get(ref)
+        if ref_old_hash == analyzer_old_commit_hash:
+            try:
+                run_cmd(
+                    ["git", "branch", "-f", ref, new_id_str], cwd=repo_path
+                )
+            except GitExecutionError:
+                pass
+
+
 def _process_branch_rebase(
     branch,
     repo_path,
@@ -317,8 +345,15 @@ def _process_branch_rebase(
         try:
             repo = pygit2.Repository(repo_path)
 
+            _sync_colocated_branches(
+                repo, branch, stack_refs, analyzer, repo_path
+            )
+
             for ref in stack_refs:
-                actual_hash = str(repo.revparse_single(ref).id)
+                try:
+                    actual_hash = str(repo.revparse_single(ref).id)
+                except KeyError:
+                    continue
                 # If the branch is fully merged into target
                 # (e.g. hash == target, or it's an ancestor like
                 # main~1 left behind by git rebase), we can safely mark

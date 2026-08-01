@@ -403,9 +403,14 @@ def test_print_final_summary():
     "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_parity",
     return_value=(True, ""),
 )
+@patch(
+    "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks._check_auth",
+    return_value=True,
+)
 @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
 def test_execute_align_pr_bases_and_sync_stacks_stack_link_success(
     mock_repo,
+    mock_auth,
     mock_parity,
     mock_cont,
     mock_anc,
@@ -482,9 +487,14 @@ def test_execute_align_pr_bases_and_sync_stacks_stack_link_success(
     "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_parity",
     return_value=(True, ""),
 )
+@patch(
+    "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks._check_auth",
+    return_value=True,
+)
 @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
 def test_execute_align_pr_bases_and_sync_stacks_stack_link_fail(
     mock_repo,
+    mock_auth,
     mock_parity,
     mock_cont,
     mock_anc,

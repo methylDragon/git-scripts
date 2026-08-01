@@ -57,10 +57,64 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self._assert_parent("test-chain-d-e-f-j", "test-chain-d-e-f-j-k")
         self._assert_parent("test-chain-d-e-f-j-k", "test-chain-d-e-f-j-k-l")
 
+    def test_execute_rebase_prefix_preserves_stack_with_colocated_branches(
+        self,
+    ):
+        # main
+        #  └─ ch3/A
+        #      ├─ ch3/B  (same commit as A)
+        #      └─ ch3/C  (child of A)
+
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit("main-base", "main_base.txt", "base")
+
+        # branch A
+        self.repo_helper.checkout("ch3/A", create=True)
+        self.repo_helper.commit("A commit", "a.txt", "a")
+
+        # branch B (co-located with A)
+        self.repo_helper.checkout("ch3/B", create=True)
+
+        # branch C (child of A)
+        self.repo_helper.checkout("ch3/A")
+        self.repo_helper.checkout("ch3/C", create=True)
+        self.repo_helper.commit("C commit", "c.txt", "c")
+
+        # Update main to force a rebase
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit("main updated", "main.txt", "updated")
+
+        ui = UI(auto_yes=True)
+        success = execute_rebase_prefix(
+            repo_path=self.repo_helper.path,
+            prefix="ch3/",
+            target="main",
+            all_worktrees=False,
+            auto_delete=False,
+            ui=ui,
+        )
+        self.assertTrue(success)
+
+        # After the rebase, check branches directly instead of via rev_parse
+        # A should be rebased onto main
+        self._assert_parent("main", "ch3/A")
+
+        # B should still be at exactly A (co-located)
+        self.assertEqual(
+            self.repo_helper.rev_parse("ch3/A"),
+            self.repo_helper.rev_parse("ch3/B"),
+        )
+
+        # C should still be a child of A
+        self._assert_parent("ch3/A", "ch3/C")
+
     def _assert_parent(self, parent_branch: str, child_branch: str):
         # child_branch~1 should equal parent_branch
         parent_hash = self.repo_helper.rev_parse(parent_branch)
-        child_parent_hash = self.repo_helper.rev_parse(f"{child_branch}~1")
+        try:
+            child_parent_hash = self.repo_helper.rev_parse(f"{child_branch}~1")
+        except Exception:
+            self.fail(f"Could not resolve parent of {child_branch}")
         self.assertEqual(
             parent_hash,
             child_parent_hash,

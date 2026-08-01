@@ -117,6 +117,7 @@ def find_tips(repo: pygit2.Repository, branches: list[str]) -> list[str]:
     """Returns branches that are not ancestors of any other in the list."""
     tips = []
 
+    # Iterate and assign true parent vs tip
     for branch in branches:
         is_tip = True
         branch_commit = repo.revparse_single(branch)
@@ -125,11 +126,20 @@ def find_tips(repo: pygit2.Repository, branches: list[str]) -> list[str]:
                 continue
             other_commit = repo.revparse_single(other_branch)
 
-            # Check if branch is ancestor of other_branch
-            if (
+            # Check if branch is strictly an ancestor of other_branch.
+            # If they point to the exact same commit, use a lexical tie-breaker
+            # to designate exactly one canonical tip.
+            is_ancestor = (
                 repo.merge_base(branch_commit.id, other_commit.id)
                 == branch_commit.id
-            ):
+            )
+
+            if not is_ancestor:
+                continue
+
+            # If co-located, only the lexically earlier branch is kept as tip.
+            # Otherwise, branch is a strict ancestor of other_branch.
+            if branch_commit.id != other_commit.id or branch > other_branch:
                 is_tip = False
                 break
 

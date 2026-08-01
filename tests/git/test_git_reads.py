@@ -46,6 +46,17 @@ class TestGitReads(absltest.TestCase):
             ),
         )
 
+    def test_find_tips_keeps_colocated_branches(self):
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("colocated1", create=True)
+        self.repo_helper.commit("commit 1", "file.txt", "content")
+        self.repo_helper.checkout("colocated2", create=True)
+
+        branches = ["main", "colocated1", "colocated2"]
+        tips = find_tips(self.repo, branches)
+        # We pick exactly one canonical representative (lexically first)
+        self.assertEqual(sorted(tips), ["colocated1"])
+
     def test_is_obsolete_returns_true_for_fast_forward_merge(self):
         # A branch that points to exactly the same tree as main
         self.repo_helper.checkout("main")

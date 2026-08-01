@@ -210,15 +210,23 @@ def get_parent_branch(
         except (KeyError, ValueError):
             continue
 
-        if repo.merge_base(cand_commit.id, branch_commit.id) == cand_commit.id:
+        if repo.merge_base(cand_commit.id, branch_commit.id) != cand_commit.id:
+            continue
+
+        if cand_commit.id == branch_commit.id:
+            if candidate >= branch:
+                continue
+            dist = 0.5
+        else:
             walker = repo.walk(
                 branch_commit.id, pygit2.enums.SortMode.TOPOLOGICAL
             )
             walker.hide(cand_commit.id)
             dist = sum(1 for _ in walker)
-            if 0 < dist < min_dist:
-                min_dist = dist
-                parent = candidate
+
+        if dist < min_dist:
+            min_dist = dist
+            parent = candidate
 
     return parent
 
@@ -275,7 +283,7 @@ def sort_branches_bottom_to_top(
     # Note: If there are multiple disjoint stacks, this might need
     # to handle multiple roots, but typically we operate on a linear stack.
 
-    branch_to_children = {b: [] for b in branches}
+    branch_to_children: dict[str, list[str]] = {b: [] for b in branches}
     roots = []
 
     for b in branches:
