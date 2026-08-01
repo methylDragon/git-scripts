@@ -19,7 +19,7 @@ jobs:
         pixi-version: v0.39.0
         cache: true
     - name: Run Python tests
-      run: pixi run test
+      run: pixi run coverage --cov-report=xml
     - name: Coveralls GitHub Action
       uses: coverallsapp/github-action@v2.3.0
       with:
