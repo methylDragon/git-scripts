@@ -17,7 +17,7 @@ from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
     calculate_pr_actions,
     execute_align_pr_bases_and_sync_stacks,
 )
-from git_scripts.gh.api import GhExecutionError
+from git_scripts.gh.api import GhExecutionError, GitHubPr
 
 # --- FUNCTIONAL CORE TESTS ---
 
@@ -33,12 +33,24 @@ def test_calculate_pr_actions():
 
     branches = {"A", "B", "C", "D"}
     pr_state = {
-        "A": {"base": "main", "url": "http://github.com/A"},
-        "C": {
-            "base": "B",
-            "url": "http://github.com/C",
-        },  # currently points to B
-        "D": {"base": "C", "url": "http://github.com/D"},
+        "A": GitHubPr(
+            headRefName="A",
+            baseRefName="main",
+            url="http://github.com/A",
+            number=1,
+        ),
+        "C": GitHubPr(
+            headRefName="C",
+            baseRefName="B",
+            url="http://github.com/C",
+            number=2,
+        ),  # currently points to B
+        "D": GitHubPr(
+            headRefName="D",
+            baseRefName="C",
+            url="http://github.com/D",
+            number=3,
+        ),
     }
 
     # Mock get_parent_branch logic directly to avoid deep repository stubs.
@@ -87,13 +99,18 @@ def test_calculate_pr_actions_with_tree_topology():
 
     # PR state: A exists, B exists, C missing, D exists, E exists
     pr_state = {
-        "A": {"base": "main", "url": "urlA"},
-        "B": {"base": "main", "url": "urlB"},  # needs to point to A
-        "D": {
-            "base": "main",
-            "url": "urlD",
-        },  # needs to point to A (since C is missing)
-        "E": {"base": "main", "url": "urlE"},  # needs to point to A
+        "A": GitHubPr(
+            headRefName="A", baseRefName="main", url="urlA", number=1
+        ),
+        "B": GitHubPr(
+            headRefName="B", baseRefName="main", url="urlB", number=2
+        ),  # needs to point to A
+        "D": GitHubPr(
+            headRefName="D", baseRefName="main", url="urlD", number=3
+        ),  # needs to point to A (since C is missing)
+        "E": GitHubPr(
+            headRefName="E", baseRefName="main", url="urlE", number=4
+        ),  # needs to point to A
     }
 
     def fake_get_parent(r, branch, candidate_branches):
@@ -141,11 +158,12 @@ def test_calculate_pr_actions_with_create_missing():
     branches = {"A", "B", "C"}
 
     pr_state = {
-        "A": {"base": "main", "url": "urlA"},
-        "C": {
-            "base": "main",
-            "url": "urlC",
-        },  # currently points to main, should point to B
+        "A": GitHubPr(
+            headRefName="A", baseRefName="main", url="urlA", number=1
+        ),
+        "C": GitHubPr(
+            headRefName="C", baseRefName="main", url="urlC", number=2
+        ),  # currently points to main, should point to B
     }
 
     def fake_get_parent(r, branch, candidate_branches):
@@ -306,7 +324,13 @@ def test_group_into_stacks():
 def test_print_branch_summary():
     ui = MagicMock()
     _print_branch_summary(
-        {"b1", "b2"}, {"b1": {"base": "main", "url": "url"}}, ui
+        {"b1", "b2"},
+        {
+            "b1": GitHubPr(
+                headRefName="b1", baseRefName="main", url="url", number=1
+            )
+        },
+        ui,
     )
     ui.print.assert_called()
 
@@ -349,7 +373,11 @@ def test_print_final_summary():
     ui = MagicMock()
     edits = [PrEditAction("b1", "old", "new", "reason", "url")]
     creates = [PrCreateAction("b1", "main", "T", "D")]
-    pr_state = {"skipped": {"base": "main", "url": "url"}}
+    pr_state = {
+        "skipped": GitHubPr(
+            headRefName="skipped", baseRefName="main", url="url", number=1
+        )
+    }
     _print_final_summary(
         edits, creates, {"skipped"}, pr_state, ui, stack_branches=["b1"]
     )
@@ -398,7 +426,11 @@ def test_execute_align_pr_bases_and_sync_stacks_stack_link_success(
     ):
         with patch(
             "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_open_prs",
-            return_value={"b1": {"base": "main", "url": "url/1"}},
+            return_value={
+                "b1": GitHubPr(
+                    headRefName="b1", baseRefName="main", url="url/1", number=1
+                )
+            },
         ):
             with patch(
                 "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.calculate_pr_actions",
@@ -473,7 +505,11 @@ def test_execute_align_pr_bases_and_sync_stacks_stack_link_fail(
     ):
         with patch(
             "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_open_prs",
-            return_value={"b1": {"base": "main", "url": "url/1"}},
+            return_value={
+                "b1": GitHubPr(
+                    headRefName="b1", baseRefName="main", url="url/1", number=1
+                )
+            },
         ):
             with patch(
                 "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.calculate_pr_actions",

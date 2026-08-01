@@ -9,6 +9,7 @@ from rich.panel import Panel
 
 from git_scripts.gh.api import (
     GhExecutionError,
+    GitHubPr,
     check_gh_installed,
     check_gh_stack_installed,
     get_open_prs,
@@ -127,7 +128,7 @@ def _compute_pr_metadata(
 def calculate_pr_actions(
     repo: pygit2.Repository,
     branches: set[str],
-    pr_state: dict[str, dict[str, str]],
+    pr_state: dict[str, GitHubPr],
     target_trunk: str = "main",
     create_missing: bool = False,
 ) -> tuple[list[PrEditAction], list[PrCreateAction]]:
@@ -159,9 +160,9 @@ def calculate_pr_actions(
             )
             continue
 
-        current_base = pr_state[branch]["base"]
-        pr_url = pr_state[branch]["url"]
-        pr_number = pr_state[branch].get("number")
+        current_base = pr_state[branch].base_ref
+        pr_url = pr_state[branch].url
+        pr_number = str(pr_state[branch].number)
 
         curr_ancestor = parent_map.get(branch)
         skipped = False
@@ -309,7 +310,7 @@ def _get_selected_branches(
 
 
 def _print_branch_summary(
-    selected_branches: set[str], pr_state: dict[str, dict[str, str]], ui: UI
+    selected_branches: set[str], pr_state: dict[str, GitHubPr], ui: UI
 ) -> None:
     branches_with_prs = [b for b in selected_branches if b in pr_state]
     branches_without_prs = [b for b in selected_branches if b not in pr_state]
@@ -318,8 +319,8 @@ def _print_branch_summary(
     if branches_with_prs:
         summary_text += "[green]Branches with open PRs:[/green]\n"
         for b in sorted(branches_with_prs):
-            base = pr_state[b]["base"]
-            url = pr_state[b]["url"]
+            base = pr_state[b].base_ref
+            url = pr_state[b].url
             summary_text += (
                 f"  - [yellow]{b}[/yellow] ([dim]base:[/dim] "
                 f"[cyan]{base}[/cyan])\n    [dim]🔗  {url}[/dim]\n"
@@ -460,7 +461,7 @@ def _print_final_summary(
     edits: list[PrEditAction],
     creates: list[PrCreateAction],
     skipped_branches: set[str],
-    pr_state: dict[str, dict[str, str]],
+    pr_state: dict[str, GitHubPr],
     ui: UI,
     stack_branches: list[str] | None = None,
 ) -> None:
@@ -472,7 +473,7 @@ def _print_final_summary(
         )
         for action in edits:
             final_summary += f"      - [yellow]{action.branch}[/yellow]\n"
-            if getattr(action, "url", None):
+            if action.url:
                 final_summary += f"        [dim]🔗  {action.url}[/dim]\n"
 
     if creates:
@@ -482,7 +483,7 @@ def _print_final_summary(
         )
         for create_action in creates:
             b = create_action.branch
-            url = getattr(create_action, "url", None)
+            url = create_action.url
             final_summary += f"      - [yellow]{b}[/yellow]\n"
             if url:
                 final_summary += f"        [dim]🔗  {url}[/dim]\n"
@@ -494,8 +495,8 @@ def _print_final_summary(
         )
         for branch in stack_branches:
             final_summary += f"      - [yellow]{branch}[/yellow]\n"
-            if branch in pr_state and pr_state[branch].get("url"):
-                url = pr_state[branch]["url"]
+            if branch in pr_state and pr_state[branch].url:
+                url = pr_state[branch].url
                 final_summary += f"        [dim]🔗  {url}[/dim]\n"
 
     if skipped_branches:
@@ -506,9 +507,12 @@ def _print_final_summary(
         )
         for branch in sorted(skipped_branches):
             final_summary += f"      - [yellow]{branch}[/yellow]\n"
-            if branch in pr_state and pr_state[branch].get("url"):
-                url = pr_state[branch]["url"]
+            if branch in pr_state and pr_state[branch].url:
+                url = pr_state[branch].url
                 final_summary += f"        [dim]🔗  {url}[/dim]\n"
+
+    if not final_summary:
+        return
 
     ui.print(
         Panel(
@@ -585,7 +589,7 @@ def _print_edits(edits: list[PrEditAction], ui: UI) -> None:
 def _sync_gh_stack(
     repo_path: str,
     ordered: list[str],
-    pr_state: dict[str, dict[str, str]],
+    pr_state: dict[str, GitHubPr],
     parent_map: dict[str, str | None],
     target: str,
     ui: UI,
@@ -606,8 +610,8 @@ def _sync_gh_stack(
     ):
         pr_number = None
         for b in ordered:
-            if b in pr_state and pr_state[b].get("url"):
-                url = pr_state[b]["url"]
+            if b in pr_state and pr_state[b].url:
+                url = pr_state[b].url
                 parts = url.split("/")
                 if parts and parts[-1].isdigit():
                     pr_number = parts[-1]

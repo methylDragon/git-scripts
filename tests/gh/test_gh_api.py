@@ -44,9 +44,9 @@ def test_get_open_prs_success(mock_run):
     ]"""
     result = get_open_prs(".")
     assert "feat-a" in result
-    assert result["feat-a"]["base"] == "main"
-    assert result["feat-a"]["url"] == "https://github.com/pr/1"
-    assert result["feat-a"]["number"] == "1"
+    assert result["feat-a"].base_ref == "main"
+    assert result["feat-a"].url == "https://github.com/pr/1"
+    assert result["feat-a"].number == 1
 
 
 @patch("subprocess.run")
@@ -59,6 +59,12 @@ def test_get_open_prs_failure(mock_run):
 
 @patch("subprocess.run")
 def test_gh_pr_edit_success(mock_run):
+    gh_pr_edit(".", "feat-a", "main", pr_number="123")
+    mock_run.assert_called_once()
+
+
+@patch("subprocess.run")
+def test_gh_pr_edit_fallback_success(mock_run):
     gh_pr_edit(".", "feat-a", "main")
     mock_run.assert_called_once()
 
@@ -69,7 +75,64 @@ def test_gh_pr_edit_failure(mock_run):
         1, "gh", stderr="Error"
     )
     with pytest.raises(GhExecutionError):
-        gh_pr_edit(".", "feat-a", "main")
+        gh_pr_edit(".", "feat-a", "main", pr_number="123")
+
+
+@patch("subprocess.run")
+def test_gh_stack_unstack_failure(mock_run):
+    mock_run.side_effect = subprocess.CalledProcessError(
+        1, "gh", stderr="Error"
+    )
+    with pytest.raises(GhExecutionError):
+        gh_stack_unstack(".")
+
+
+@patch("subprocess.run")
+def test_gh_stack_link_failure(mock_run):
+    mock_run.side_effect = subprocess.CalledProcessError(
+        1, "gh", stderr="Error"
+    )
+    with pytest.raises(GhExecutionError):
+        gh_stack_link(".", ["a", "b"])
+
+
+@patch("subprocess.run")
+def test_gh_stack_view_success(mock_run):
+    from git_scripts.gh.api import gh_stack_view
+
+    mock_run.return_value.stdout = '{"some": "data"}'
+    res = gh_stack_view(".")
+    assert res == {"some": "data"}
+
+
+@patch("subprocess.run")
+def test_gh_stack_view_failure(mock_run):
+    from git_scripts.gh.api import gh_stack_view
+
+    mock_run.side_effect = subprocess.CalledProcessError(
+        1, "gh", stderr="Error"
+    )
+    res = gh_stack_view(".")
+    assert res == {}
+
+
+@patch("subprocess.run")
+def test_gh_stack_checkout_success(mock_run):
+    from git_scripts.gh.api import gh_stack_checkout
+
+    gh_stack_checkout(".", "id")
+    mock_run.assert_called_once()
+
+
+@patch("subprocess.run")
+def test_gh_stack_checkout_failure(mock_run):
+    from git_scripts.gh.api import gh_stack_checkout
+
+    mock_run.side_effect = subprocess.CalledProcessError(
+        1, "gh", stderr="Error"
+    )
+    with pytest.raises(GhExecutionError):
+        gh_stack_checkout(".", "id")
 
 
 @patch("subprocess.run")
@@ -114,4 +177,10 @@ def test_gh_stack_link_empty(mock_run):
 @patch("subprocess.run")
 def test_gh_stack_unstack_success(mock_run):
     gh_stack_unstack(".")
+    mock_run.assert_called_once()
+
+
+@patch("subprocess.run")
+def test_gh_stack_unstack_with_args(mock_run):
+    gh_stack_unstack(".", stack_number="1", local=True)
     mock_run.assert_called_once()

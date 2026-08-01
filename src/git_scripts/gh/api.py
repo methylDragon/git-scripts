@@ -3,11 +3,22 @@
 import json
 import subprocess
 
+from pydantic import BaseModel, Field, TypeAdapter
+
 
 class GhExecutionError(Exception):
     """Raised when a gh CLI command fails."""
 
     pass
+
+
+class GitHubPr(BaseModel):
+    """Pydantic model representing a GitHub Pull Request from the gh CLI."""
+
+    head_ref: str = Field(alias="headRefName")
+    base_ref: str = Field(alias="baseRefName")
+    url: str
+    number: int
 
 
 def run_gh_cmd(cmd: list[str], cwd: str | None = None) -> str:
@@ -101,8 +112,8 @@ def gh_stack_unstack(
         raise GhExecutionError(msg) from e
 
 
-def get_open_prs(repo_path: str) -> dict[str, dict[str, str]]:
-    """Returns a dict mapping headRefName to baseRefName, url, and number."""
+def get_open_prs(repo_path: str) -> dict[str, GitHubPr]:
+    """Returns a dict mapping headRefName to GitHubPr models."""
     try:
         stdout = run_gh_cmd(
             [
@@ -118,16 +129,9 @@ def get_open_prs(repo_path: str) -> dict[str, dict[str, str]]:
             ],
             cwd=repo_path,
         )
-        data = json.loads(stdout)
-        return {
-            pr["headRefName"]: {
-                "base": pr["baseRefName"],
-                "url": pr["url"],
-                "number": str(pr["number"]),
-            }
-            for pr in data
-        }
-    except (GhExecutionError, json.JSONDecodeError):
+        prs = TypeAdapter(list[GitHubPr]).validate_json(stdout)
+        return {pr.head_ref: pr for pr in prs}
+    except (GhExecutionError, Exception):
         return {}
 
 

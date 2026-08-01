@@ -4,8 +4,8 @@ This document captures the higher-level design philosophy and domain semantics f
 
 ## 1. Data Models (Dataclasses vs Pydantic)
 
-- **Native Dataclasses:** We exclusively use native `@dataclass(frozen=True)` over Pydantic `BaseModel` for internal data structures and models.
-- **Why?** For a local CLI utility walking Git graphs, execution speed, immutability, and a low memory footprint are paramount. Pydantic introduces unnecessary runtime coercion overhead for deterministic local data. We prefer static verification via Mypy/Pyright over runtime payload validation.
+- **Native Dataclasses:** We prefer native `@dataclass(frozen=True)` for internal data structures and graph models where execution speed, immutability, and a low memory footprint are paramount.
+- **Pydantic:** Pydantic `BaseModel` is permitted and recommended for parsing, mapping, and validating external API payloads (such as GitHub API JSON responses) where automatic field aliasing and runtime schema validation are beneficial.
 - **Enums:** We prefer explicit Python `Enum` classes over string literals or `Literal` types for routing application logic (e.g., `RebaseAction`).
 
 ## 2. Domain Naming & Side Effects
