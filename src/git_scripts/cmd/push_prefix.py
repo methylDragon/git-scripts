@@ -1,9 +1,12 @@
 """Core logic for the git-push-prefix command."""
 
 import pygit2
-from rich.panel import Panel
 
-from git_scripts.git.writes import GitExecutionError, push_branches, run_cmd
+from git_scripts.git.writes import (
+    GitExecutionError,
+    prompt_and_push_branches,
+    run_cmd,
+)
 from git_scripts.ui import UI
 
 
@@ -57,54 +60,10 @@ def execute_push_prefix(
         repo, prefix
     )
 
-    if not branches_to_push:
-        if up_to_date_count == 0:
-            ui.print("    No matching branches found.")
-        else:
-            ui.print(
-                f"✅  All matched branches ({up_to_date_count}) "
-                "are already up-to-date with origin."
-            )
-        return True
-
-    branch_list = "\n".join(f"  - [cyan]{b}[/cyan]" for b in branches_to_push)
-    ui.print(
-        Panel(
-            branch_list,
-            title=(
-                f"[bold cyan]Found {len(branches_to_push)} branches to "
-                f"push[/bold cyan] [dim](Skipped {up_to_date_count} "
-                "up-to-date)[/dim]"
-            ),
-            border_style="cyan",
-            expand=False,
-        )
+    return prompt_and_push_branches(
+        branches=branches_to_push,
+        ui=ui,
+        push_opts=push_opts,
+        repo_path=repo_path,
+        skipped_count=up_to_date_count,
     )
-
-    if not ui.auto_yes:
-        action = ui.ask_choice(
-            f"❓  Push {len(branches_to_push)} branches to origin?",
-            choices=["Push all", "Select which to push", "Skip all"],
-            default="Push all",
-        )
-        match action:
-            case "Skip all":
-                ui.print("❌  Operation cancelled.")
-                return True
-            case "Select which to push":
-                branches_to_push = ui.ask_checkbox(
-                    "Select branches to push:", choices=branches_to_push
-                )
-
-    if not branches_to_push:
-        ui.print("❌  Operation cancelled.")
-        return True
-
-    opts_str = " ".join(push_opts) or "(none)"
-    ui.print(f"\n🚀  Pushing to origin (Options: {opts_str})...")
-    if push_branches(branches_to_push, push_opts, repo_path=repo_path):
-        ui.print("\n✅  Batch push complete.")
-        return True
-    else:
-        ui.print("\n[red]❌  Push failed.[/red]")
-        return False

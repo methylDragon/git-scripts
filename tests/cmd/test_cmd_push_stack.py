@@ -48,7 +48,7 @@ class TestCmdPushStack(absltest.TestCase):
         self.repo = pygit2.Repository(self.repo_helper.path)
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.cmd.push_stack.push_branches")
+    @mock.patch("git_scripts.git.writes.push_branches")
     def test_execute_push_stack_with_push(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -83,7 +83,7 @@ class TestCmdPushStack(absltest.TestCase):
         )
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.cmd.push_stack.push_branches")
+    @mock.patch("git_scripts.git.writes.push_branches")
     def test_execute_push_stack_fork_aborts(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -147,7 +147,7 @@ class TestCmdPushStack(absltest.TestCase):
             )
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.cmd.push_stack.push_branches")
+    @mock.patch("git_scripts.git.writes.push_branches")
     def test_execute_push_stack_up_to_date(
         self, mock_push_branches, mock_run_cmd
     ):

@@ -7,7 +7,10 @@ import sys
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from rich.panel import Panel
+
 from git_scripts.models import WorktreeState
+from git_scripts.ui import UI
 
 
 class GitExecutionError(Exception):
@@ -383,4 +386,80 @@ def push_branches(
         subprocess.run(cmd, cwd=repo_path, check=True)
         return True
     except subprocess.CalledProcessError:
+        return False
+
+
+def prompt_and_push_branches(
+    branches: list[str],
+    ui: UI,
+    push_opts: list[str] | None = None,
+    repo_path: str = ".",
+    skipped_count: int = 0,
+    prompt_title: str | None = None,
+    panel_title: str | None = None,
+) -> bool:
+    """Displays branches, prompts for selection, and pushes."""
+    if push_opts is None:
+        push_opts = []
+
+    if not branches:
+        if skipped_count == 0:
+            ui.print("    No matching branches found.")
+        else:
+            ui.print(
+                f"✅  All branches ({skipped_count}) "
+                "are already up-to-date with origin."
+            )
+        return True
+
+    branch_list = "\n".join(f"  - [cyan]{b}[/cyan]" for b in branches)
+    skipped_str = (
+        f" [dim](Skipped {skipped_count} up-to-date)[/dim]"
+        if skipped_count > 0
+        else ""
+    )
+
+    if panel_title is None:
+        panel_title = (
+            f"[bold cyan]Found {len(branches)} branches to push[/bold cyan]"
+        )
+
+    ui.print(
+        Panel(
+            branch_list,
+            title=f"{panel_title}{skipped_str}",
+            border_style="cyan",
+            expand=False,
+        )
+    )
+
+    branches_to_push = list(branches)
+    if not ui.auto_yes:
+        if prompt_title is None:
+            prompt_title = f"Push {len(branches)} branches to origin?"
+        action = ui.ask_choice(
+            f"❓  {prompt_title}",
+            choices=["Push all", "Select which to push", "Skip all"],
+            default="Push all",
+        )
+        match action:
+            case "Skip all":
+                ui.print("❌  Operation cancelled.")
+                return True
+            case "Select which to push":
+                branches_to_push = ui.ask_checkbox(
+                    "Select branches to push:", choices=branches_to_push
+                )
+
+    if not branches_to_push:
+        ui.print("❌  Operation cancelled.")
+        return True
+
+    opts_str = " ".join(push_opts) or "(none)"
+    ui.print(f"\n🚀  Pushing to origin (Options: {opts_str})...")
+    if push_branches(branches_to_push, push_opts, repo_path=repo_path):
+        ui.print("\n✅  Batch push complete.")
+        return True
+    else:
+        ui.print("\n[red]❌  Push failed.[/red]")
         return False

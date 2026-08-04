@@ -17,6 +17,7 @@ from git_scripts.git.writes import (
     GitExecutionError,
     is_in_another_worktree,
     manage_worktrees,
+    prompt_and_push_branches,
     rebase_onto,
     rebase_standard,
     run_cmd,
@@ -203,6 +204,21 @@ def execute_rebase_prefix(
     _delete_merged(
         branches_to_delete, branches_to_keep, auto_delete, ui, repo_path
     )
+
+    if branches_to_keep:
+        prompt_and_push_branches(
+            branches=list(branches_to_keep),
+            ui=ui,
+            push_opts=["--force-with-lease"],
+            repo_path=repo_path,
+            prompt_title=(
+                f"Push {len(branches_to_keep)} updated branches to origin?"
+            ),
+            panel_title=(
+                f"[bold cyan]Local branches updated "
+                f"({len(branches_to_keep)})[/bold cyan]"
+            ),
+        )
 
     if start_branch:
         try:

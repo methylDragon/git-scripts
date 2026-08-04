@@ -1,3 +1,5 @@
+from unittest import mock
+
 from absl.testing import absltest
 
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
@@ -12,7 +14,10 @@ class TestCmdRebasePrefix(absltest.TestCase):
     def tearDown(self):
         self.repo_helper.cleanup()
 
-    def test_execute_rebase_prefix_rebases_linear_and_forking_chains(self):
+    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    def test_execute_rebase_prefix_rebases_linear_and_forking_chains(
+        self, mock_push
+    ):
         self.repo_helper.checkout("main")
         self.repo_helper.commit("main-update")
 
@@ -57,8 +62,9 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self._assert_parent("test-chain-d-e-f-j", "test-chain-d-e-f-j-k")
         self._assert_parent("test-chain-d-e-f-j-k", "test-chain-d-e-f-j-k-l")
 
+    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
     def test_execute_rebase_prefix_preserves_stack_with_colocated_branches(
-        self,
+        self, mock_push
     ):
         # main
         #  └─ ch3/A

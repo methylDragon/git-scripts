@@ -1,3 +1,5 @@
+from unittest import mock
+
 import pygit2
 from absl.testing import absltest
 
@@ -32,7 +34,10 @@ class TestCmdEvolve(absltest.TestCase):
         self.old_hash = str(old_head)
         self.new_hash = str(self.repo.revparse_single("HEAD").id)
 
-    def test_execute_evolve_restores_stack_when_given_explicit_old_hash(self):
+    @mock.patch("git_scripts.cmd.evolve.prompt_and_push_branches")
+    def test_execute_evolve_restores_stack_when_given_explicit_old_hash(
+        self, mock_push
+    ):
         ui = UI(auto_yes=True)
         result = execute_evolve(
             self.repo_helper.path, old_hash=self.old_hash, ui=ui
@@ -44,8 +49,9 @@ class TestCmdEvolve(absltest.TestCase):
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
 
+    @mock.patch("git_scripts.cmd.evolve.prompt_and_push_branches")
     def test_execute_evolve_restores_stack_by_finding_old_base_via_reflog(
-        self,
+        self, mock_push
     ):
         ui = UI(auto_yes=True)
         result = execute_evolve(self.repo_helper.path, old_hash=None, ui=ui)
@@ -56,8 +62,9 @@ class TestCmdEvolve(absltest.TestCase):
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
 
+    @mock.patch("git_scripts.cmd.evolve.prompt_and_push_branches")
     def test_execute_evolve_restores_stack_via_remote_tracking_branch(
-        self,
+        self, mock_push
     ):
         # Simulate a scenario where the reflog is wiped, but the remote
         # tracking branch still points to the old hash.

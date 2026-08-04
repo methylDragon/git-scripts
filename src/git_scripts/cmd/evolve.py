@@ -13,6 +13,7 @@ from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.writes import (
     GitExecutionError,
     manage_worktrees,
+    prompt_and_push_branches,
     rebase_onto,
     run_cmd,
 )
@@ -245,7 +246,7 @@ def execute_evolve(
         ui.print("❌  Aborting.")
         return False
 
-    success_count, failed_log = _evolve_stacks(
+    success_count, failed_log, successfully_evolved_branches = _evolve_stacks(
         repo_path,
         orphans,
         analyzer,
@@ -260,7 +261,26 @@ def execute_evolve(
         except GitExecutionError:
             pass
 
-    return _print_evolve_summary(ui, success_count, failed_log)
+    ans = _print_evolve_summary(ui, success_count, failed_log)
+
+    if successfully_evolved_branches:
+        panel_title = (
+            f"[bold cyan]Local branches updated "
+            f"({len(successfully_evolved_branches)})[/bold cyan]"
+        )
+        prompt_and_push_branches(
+            branches=successfully_evolved_branches,
+            ui=ui,
+            push_opts=["--force-with-lease"],
+            repo_path=repo_path,
+            prompt_title=(
+                f"Push {len(successfully_evolved_branches)} "
+                "updated branches to origin?"
+            ),
+            panel_title=panel_title,
+        )
+
+    return ans
 
 
 def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
@@ -300,9 +320,10 @@ def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
 
 def _evolve_stacks(
     repo_path, orphans, analyzer: TopologyAnalyzer, new_hash, old_hash, ui
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[str], list[str]]:
     success_count = 0
     failed_log = []
+    successfully_evolved_branches = []
 
     with manage_worktrees(active=True, repo_path=repo_path) as wt_state:
         failed_branches = wt_state.failed_branches
@@ -351,10 +372,13 @@ def _evolve_stacks(
             if rebase_ok:
                 ui.print("    ✅  Success.")
                 success_count += 1
+                for ref in stack_refs:
+                    if ref in orphans:
+                        successfully_evolved_branches.append(ref)
             else:
                 ui.print("    💥 Conflict. Aborting...")
                 failed_log.append(
                     format_stack_tree(repo, tip, allowed_refs=set(orphans))
                 )
 
-    return success_count, failed_log
+    return success_count, failed_log, successfully_evolved_branches
