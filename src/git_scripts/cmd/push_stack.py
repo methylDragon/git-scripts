@@ -3,6 +3,10 @@
 import pygit2
 from rich.panel import Panel
 
+from git_scripts.git.topology import (
+    get_parent_branch,
+    sort_branches_bottom_to_top,
+)
 from git_scripts.git.writes import GitExecutionError, push_branches, run_cmd
 from git_scripts.ui import UI
 
@@ -37,8 +41,6 @@ def _get_out_of_sync_branches_in_stack(
 def _get_linear_stack(
     repo, current_branch: str, target: str, pool: set[str], ui
 ) -> set[str] | None:
-    from git_scripts.git.topology import get_parent_branch
-
     stack = {current_branch}
 
     if current_branch != target:
@@ -126,11 +128,6 @@ def execute_push_stack(
     stack = _get_linear_stack(repo, current_branch, target, pool, ui)
     if stack is None:
         return False
-
-    from git_scripts.git.topology import (
-        get_parent_branch,
-        sort_branches_bottom_to_top,
-    )
 
     if not stack or (len(stack) == 1 and list(stack)[0] == target):
         ui.print(

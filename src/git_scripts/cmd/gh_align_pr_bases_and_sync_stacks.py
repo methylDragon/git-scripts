@@ -426,13 +426,13 @@ def _execute_edits(edits: list[PrEditAction], repo_path: str, ui: UI) -> bool:
 def _execute_creates(
     creates: list[PrCreateAction], repo_path: str, ui: UI
 ) -> bool:
+    import time
+
     success = True
     if creates:
         ui.print("\n🚀  Creating missing PRs via GitHub API...")
         for action in creates:
             try:
-                import time
-
                 time.sleep(1)
                 url = gh_pr_create(
                     repo_path,

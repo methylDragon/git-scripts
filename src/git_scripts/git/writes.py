@@ -3,6 +3,7 @@
 import os
 import shlex
 import subprocess
+import sys
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -15,21 +16,27 @@ class GitExecutionError(Exception):
     pass
 
 
-def run_cmd(cmd: list[str], cwd: str | None = None, check: bool = True) -> str:
+def run_cmd(
+    cmd: list[str],
+    cwd: str | None = None,
+    check: bool = True,
+    capture_output: bool = True,
+) -> str:
     """Executes a subprocess command and returns stripped stdout."""
     try:
         result = subprocess.run(
             cmd,
             cwd=cwd,
             check=check,
-            capture_output=True,
+            capture_output=capture_output,
             text=True,
         )
-        return result.stdout.strip()
+        return result.stdout.strip() if result.stdout else ""
     except subprocess.CalledProcessError as e:
         cmd_str = shlex.join(cmd)
+        err_out = e.stderr.strip() if getattr(e, "stderr", None) else str(e)
         raise GitExecutionError(
-            f"Command failed: {cmd_str}\nError: {e.stderr.strip()}"
+            f"Command failed: {cmd_str}\nError: {err_out}"
         ) from e
 
 
@@ -261,8 +268,6 @@ def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
 
         match ans:
             case "Abort script without rollback":
-                import sys
-
                 ui.print(
                     "    [yellow]Leaving repository in current state "
                     "(rebase in progress).[/yellow]"
@@ -289,13 +294,17 @@ def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
                             "--continue",
                         ],
                         cwd=repo_path,
+                        capture_output=False,
                     )
                     ui.print("    ✅  Rebase finished. Continuing script...")
                     return True
-                except GitExecutionError:
+                except GitExecutionError as e:
+                    err_msg = str(e)
+                    if "Error:" in err_msg:
+                        err_msg = err_msg.split("Error:", 1)[1].strip()
                     ui.print(
-                        "    [red]⚠️  Rebase could not continue. "
-                        "There may still be unresolved conflicts.[/red]"
+                        f"    [red]⚠️  Rebase could not continue.\n"
+                        f"{err_msg}[/red]"
                     )
                     continue
             case _:

@@ -14,6 +14,7 @@ from git_scripts.git.writes import (
     GitExecutionError,
     manage_worktrees,
     rebase_onto,
+    run_cmd,
 )
 from git_scripts.ui import UI
 
@@ -255,8 +256,6 @@ def execute_evolve(
 
     if current_branch_name:
         try:
-            from git_scripts.git.writes import run_cmd
-
             run_cmd(["git", "checkout", current_branch_name], cwd=repo_path)
         except GitExecutionError:
             pass

@@ -80,6 +80,7 @@ class TestGitWrites(absltest.TestCase):
         mock_run_cmd.assert_called_with(
             ["git", "-c", "core.editor=true", "rebase", "--continue"],
             cwd=".",
+            capture_output=False,
         )
 
     @patch("git_scripts.git.writes.run_cmd")
@@ -102,10 +103,6 @@ class TestGitWrites(absltest.TestCase):
         result = rebase_onto("onto_hash", "old_hash", "branch", ui=mock_ui)
         self.assertTrue(result)
         self.assertEqual(mock_run_cmd.call_count, 3)
-        mock_ui.print.assert_any_call(
-            "    [red]⚠️  Rebase could not continue. "
-            "There may still be unresolved conflicts.[/red]"
-        )
 
     @patch("git_scripts.git.writes.run_cmd")
     def test_rebase_onto_raises_exception_when_user_aborts_and_rollbacks(
