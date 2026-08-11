@@ -1,6 +1,7 @@
 """Command logic for git-gh-align-pr-bases-and-sync-stacks."""
 
 import os
+import time
 from dataclasses import dataclass
 
 import pygit2
@@ -277,7 +278,7 @@ def _get_selected_branches(
                 ],
                 default="Current stack only",
             )
-            if action == "Cancel":
+            if action == "Cancel" or action is None:
                 return set()
             elif action == "Current stack only":
                 current_stack_only = True
@@ -356,6 +357,8 @@ def _prompt_creates(
     if not creates:
         return []
 
+    creates.sort(key=lambda c: c.branch)
+
     ui.print("\n[bold green]Potential PR Creations (Drafts):[/bold green]")
     if not ui.auto_yes:
         choices = []
@@ -404,12 +407,15 @@ def _execute_edits(edits: list[PrEditAction], repo_path: str, ui: UI) -> bool:
         ui.print("\n🚀  Updating PR bases via GitHub API...")
         for action in edits:
             try:
-                gh_pr_edit(
-                    repo_path,
-                    action.branch,
-                    action.new_base,
-                    action.pr_number,
-                )
+                if not os.environ.get("GIT_SCRIPTS_DEMO"):
+                    gh_pr_edit(
+                        repo_path,
+                        action.branch,
+                        action.new_base,
+                        action.pr_number,
+                    )
+                else:
+                    time.sleep(0.5)
                 ui.print(
                     f"  ✅  Updated [yellow]{action.branch}[/yellow] ➔ "
                     f"[green]{action.new_base}[/green]"
@@ -426,21 +432,23 @@ def _execute_edits(edits: list[PrEditAction], repo_path: str, ui: UI) -> bool:
 def _execute_creates(
     creates: list[PrCreateAction], repo_path: str, ui: UI
 ) -> bool:
-    import time
-
     success = True
     if creates:
         ui.print("\n🚀  Creating missing PRs via GitHub API...")
         for action in creates:
             try:
                 time.sleep(1)
-                url = gh_pr_create(
-                    repo_path,
-                    action.branch,
-                    action.base,
-                    title=action.title,
-                    body=action.description,
-                )
+                if not os.environ.get("GIT_SCRIPTS_DEMO"):
+                    url = gh_pr_create(
+                        repo_path,
+                        action.branch,
+                        action.base,
+                        title=action.title,
+                        body=action.description,
+                    )
+                else:
+                    b_id = action.branch.split("/")[-1]
+                    url = f"https://github.com/demo/pull/{b_id}"
                 action.url = url
                 ui.print(
                     f"  ✅  Created Draft PR for "
@@ -625,7 +633,8 @@ def _sync_gh_stack(
                 "local tracking..."
             )
             try:
-                gh_stack_checkout(repo_path, pr_number)
+                if not os.environ.get("GIT_SCRIPTS_DEMO"):
+                    gh_stack_checkout(repo_path, pr_number)
             except GhExecutionError as e:
                 ui.print(f"  ⚠️   Checkout failed: [dim]{str(e)}[/dim]")
 
@@ -634,7 +643,8 @@ def _sync_gh_stack(
             "synchronization..."
         )
         try:
-            gh_stack_unstack(repo_path)
+            if not os.environ.get("GIT_SCRIPTS_DEMO"):
+                gh_stack_unstack(repo_path)
             ui.print("  ✅  Unstacked successfully!")
         except GhExecutionError as e:
             ui.print(
@@ -644,7 +654,8 @@ def _sync_gh_stack(
 
         ui.print("\n🚀  Linking stack on GitHub...")
         try:
-            gh_stack_link(repo_path, ordered)
+            if not os.environ.get("GIT_SCRIPTS_DEMO"):
+                gh_stack_link(repo_path, ordered)
             ui.print("  ✅  Stack linked successfully!")
             return True
         except GhExecutionError as e:
@@ -659,6 +670,8 @@ def _sync_gh_stack(
 
 
 def _check_auth(ui: UI) -> bool:
+    if os.environ.get("GIT_SCRIPTS_DEMO"):
+        return True
     if not check_gh_installed():
         ui.print(
             "[red]❌  Error: GitHub CLI ('gh') is not installed "
@@ -714,7 +727,23 @@ def execute_align_pr_bases_and_sync_stacks(
     ordered = ordered_or_none
 
     ui.print("🔄  Fetching GitHub PR states...")
-    pr_state = get_open_prs(repo_path)
+    if os.environ.get("GIT_SCRIPTS_DEMO"):
+        pr_state = {
+            "demo/d-e": GitHubPr(
+                headRefName="demo/d-e",
+                baseRefName="main",
+                url="https://github.com/demo/pull/2",
+                number=2,
+            ),
+            "demo/d": GitHubPr(
+                headRefName="demo/d",
+                baseRefName="main",
+                url="https://github.com/demo/pull/1",
+                number=1,
+            ),
+        }
+    else:
+        pr_state = get_open_prs(repo_path)
 
     _print_branch_summary(selected_branches, pr_state, ui)
 

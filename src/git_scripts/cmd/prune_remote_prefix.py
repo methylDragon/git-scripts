@@ -90,7 +90,7 @@ def _find_obsolete_remote_branches(
     )
 
 
-def execute_prune_remote(
+def execute_prune_remote_prefix(
     repo_path: str,
     prefix: str,
     target: str = "main",

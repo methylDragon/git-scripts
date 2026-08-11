@@ -1,6 +1,7 @@
 """GitHub CLI abstractions and utilities."""
 
 import json
+import os
 import subprocess
 
 from pydantic import BaseModel, Field, TypeAdapter
@@ -55,6 +56,8 @@ def check_gh_installed() -> bool:
 
 def check_gh_stack_installed() -> bool:
     """Returns True if the github/gh-stack extension is installed."""
+    if os.environ.get("GIT_SCRIPTS_DEMO"):  # Escape hatch for demos only
+        return True
     try:
         stdout = run_gh_cmd(["gh", "extension", "list"])
         return "gh-stack" in stdout

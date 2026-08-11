@@ -1,4 +1,4 @@
-"""Core logic for the git-prune-local-branches command."""
+"""Core logic for the git-prune-local command."""
 
 from rich.panel import Panel
 
@@ -48,7 +48,7 @@ def execute_prune_local(
         ui = UI()
 
     if dry_run:
-        ui.print("Running git-prune-local-branches in dry-run mode...")
+        ui.print("Running git-prune-local in dry-run mode...")
 
     ui.print("[dim]🔄  Fetching origin --prune...[/dim]")
     try:

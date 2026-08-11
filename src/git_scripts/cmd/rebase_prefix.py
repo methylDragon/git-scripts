@@ -477,5 +477,16 @@ def _delete_merged(
             run_cmd(
                 ["git", "branch", "-D"] + selected_to_delete, cwd=repo_path
             )
+            deleted_list = "\n".join(
+                f"  [red]- {b}[/red]" for b in selected_to_delete
+            )
+            ui.print(
+                Panel(
+                    deleted_list,
+                    title="[bold red]Deleted Branches[/bold red]",
+                    border_style="red",
+                    expand=False,
+                )
+            )
         except GitExecutionError:
             pass

@@ -156,6 +156,43 @@ def _print_evolve_summary(ui, success_count: int, failed_log: list) -> bool:
     return True
 
 
+def _get_current_branch_name(repo: pygit2.Repository) -> str:
+    try:
+        if not repo.head_is_detached and not repo.head_is_unborn:
+            return repo.head.shorthand
+    except pygit2.GitError:
+        pass
+    return ""
+
+
+def _resolve_old_hash(
+    repo: pygit2.Repository, repo_path: str, old_hash: str | None, ui: UI
+) -> str | None:
+    if not old_hash:
+        resolved = find_old_base(repo_path)
+        if not resolved:
+            ui.print("❌  Error: Could not find previous HEAD in reflog.")
+            ui.print("Usage: git-evolve <OLD_HASH>")
+            return None
+        ui.print(
+            f"ℹ️  No hash provided. Auto-detected previous HEAD: {resolved[:7]}"
+        )
+        return resolved
+    try:
+        return str(repo.revparse_single(old_hash).id)
+    except (KeyError, ValueError):
+        ui.print(f"❌  Error: Invalid old hash '{old_hash}'.")
+        return None
+
+
+def _restore_current_branch(repo_path: str, current_branch_name: str) -> None:
+    if current_branch_name:
+        try:
+            run_cmd(["git", "checkout", current_branch_name], cwd=repo_path)
+        except GitExecutionError:
+            pass
+
+
 def execute_evolve(
     repo_path: str,
     old_hash: str | None = None,
@@ -186,30 +223,13 @@ def execute_evolve(
     repo = get_repo(repo_path)
     new_hash = str(repo.revparse_single("HEAD").id)
 
-    current_branch_name = ""
-    try:
-        if not repo.head_is_detached and not repo.head_is_unborn:
-            current_branch_name = repo.head.shorthand
-    except pygit2.GitError:
-        pass
+    current_branch_name = _get_current_branch_name(repo)
 
-    if not old_hash:
-        old_hash = find_old_base(repo_path)
-        if not old_hash:
-            ui.print("❌  Error: Could not find previous HEAD in reflog.")
-            ui.print("Usage: git-evolve <OLD_HASH>")
-            return False
-        ui.print(
-            f"ℹ️  No hash provided. Auto-detected previous HEAD: {old_hash[:7]}"
-        )
-    else:
-        try:
-            old_hash = str(repo.revparse_single(old_hash).id)
-        except (KeyError, ValueError):
-            ui.print(f"❌  Error: Invalid old hash '{old_hash}'.")
-            return False
+    resolved_old_hash = _resolve_old_hash(repo, repo_path, old_hash, ui)
+    if not resolved_old_hash:
+        return False
 
-    if old_hash == new_hash:
+    if resolved_old_hash == new_hash:
         ui.print(
             "✅  HEAD is identical to the target hash. Nothing to evolve."
         )
@@ -217,10 +237,12 @@ def execute_evolve(
 
     ui.print(
         f"[dim]🔍  Scanning for stacks displaced by move "
-        f"from {old_hash[:7]} to {new_hash[:7]}...[/dim]"
+        f"from {resolved_old_hash[:7]} to {new_hash[:7]}...[/dim]"
     )
 
-    orphans = _get_orphans(repo, old_hash, new_hash, current_branch_name)
+    orphans = _get_orphans(
+        repo, resolved_old_hash, new_hash, current_branch_name
+    )
 
     if not orphans:
         ui.print("✅  No displaced branches found.")
@@ -251,31 +273,34 @@ def execute_evolve(
         orphans,
         analyzer,
         new_hash,
-        old_hash,
+        resolved_old_hash,
         ui,
     )
 
-    if current_branch_name:
-        try:
-            run_cmd(["git", "checkout", current_branch_name], cwd=repo_path)
-        except GitExecutionError:
-            pass
+    _restore_current_branch(repo_path, current_branch_name)
 
     ans = _print_evolve_summary(ui, success_count, failed_log)
 
     if successfully_evolved_branches:
+        branches_to_push = list(successfully_evolved_branches)
+
+        # Add current branch
+        if current_branch_name:
+            if current_branch_name not in branches_to_push:
+                branches_to_push.insert(0, current_branch_name)
+
         panel_title = (
-            f"[bold cyan]Local branches updated "
-            f"({len(successfully_evolved_branches)})[/bold cyan]"
+            f"[bold cyan]Local branches updated/amended "
+            f"({len(branches_to_push)})[/bold cyan]"
         )
+
         prompt_and_push_branches(
-            branches=successfully_evolved_branches,
+            branches=branches_to_push,
             ui=ui,
             push_opts=["--force-with-lease"],
             repo_path=repo_path,
             prompt_title=(
-                f"Push {len(successfully_evolved_branches)} "
-                "updated branches to origin?"
+                f"Push {len(branches_to_push)} updated branches to origin?"
             ),
             panel_title=panel_title,
         )
@@ -328,7 +353,7 @@ def _evolve_stacks(
     with manage_worktrees(active=True, repo_path=repo_path) as wt_state:
         failed_branches = wt_state.failed_branches
         for tip in analyzer.tips:
-            ui.print(f"🔗 Reconnecting stack '{tip}'...")
+            ui.print(f"🔗  Reconnecting stack '{tip}'...")
             repo = get_repo(repo_path)
             stack_refs = get_stack_branches(repo, tip)
 

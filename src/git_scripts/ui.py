@@ -50,7 +50,7 @@ class UI:
 
     def ask_choice(
         self, msg: str, choices: list[str], default: str | None = None
-    ) -> str:
+    ) -> str | None:
         """Prompts the user to select a single choice from a list.
 
         If auto_yes is True, returns the default choice.
@@ -84,10 +84,9 @@ class UI:
                         return choices[idx]
                 except (ValueError, EOFError):
                     print()
-                    return default if default else choices[0]
+                    return None
 
-        ans = questionary.select(msg, choices=choices, default=default).ask()
-        return ans if ans is not None else (default if default else choices[0])
+        return questionary.select(msg, choices=choices, default=default).ask()
 
     def ask_checkbox(
         self, msg: str, choices: Sequence[str | questionary.Choice]

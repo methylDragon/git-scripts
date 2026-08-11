@@ -10,6 +10,7 @@ select = [
     "C",  # flake8-comprehensions
     "B",  # flake8-bugbear
     "D",  # pydocstyle
+    "UP", # pyupgrade
 ]
 ignore = []
 

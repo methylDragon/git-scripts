@@ -9,7 +9,7 @@ from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
     execute_align_pr_bases_and_sync_stacks,
 )
 from git_scripts.cmd.prune_local import execute_prune_local
-from git_scripts.cmd.prune_remote import execute_prune_remote
+from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
 from git_scripts.cmd.push_prefix import execute_push_prefix
 from git_scripts.cmd.push_stack import execute_push_stack
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
@@ -202,8 +202,8 @@ def prune_local(
     raise typer.Exit(code=0 if success else 1)
 
 
-@app.command("prune-remote")
-def prune_remote(
+@app.command("prune-remote-prefix")
+def prune_remote_prefix(
     prefix: Annotated[str, typer.Argument(help="Prefix to match")],
     target: Annotated[str, typer.Argument(help="Target branch")] = "main",
     dry_run: Annotated[
@@ -234,7 +234,7 @@ def prune_remote(
     """Prunes remote branches that have been fully merged into the target."""
     ui = UI(plain=plain, auto_yes=yes)
 
-    success = execute_prune_remote(
+    success = execute_prune_remote_prefix(
         repo_path=".",
         prefix=prefix,
         target=target,

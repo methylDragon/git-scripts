@@ -7,6 +7,54 @@ A collection of scripts to wrangle branches, especially in a [stacked-diff](http
 
 These scripts handle "obsolete" commits, merged commits, and branching histories relatively intelligently. Stack structure and branching are preserved, and any rebase issues are flagged and gracefully aborted for that stack.
 
+## Demos
+
+These tools are designed to streamline the workflow of managing [Stacked Pull Requests](https://newsletter.pragmaticengineer.com/p/stacked-diffs).
+
+We'll showcase its usefulness with a typical workflow of trying to create a stack for GitHub.
+
+We'll:
+
+1. **Pull and rebase:**: Pull the latest changes and rebase our stacks using `git rebase-prefix`.
+1. **Evolve:**: Rewire any orphaned stacks we generate if we ever need to amend using `git evolve`.
+1. **Push:**: Mass push branches in the stack using `git push-prefix` or `git push-stack`.
+1. **Sync:**: Now that the branches are on GitHub, automatically create PRs and align GitHub stacks using `git gh-align-pr-bases-and-sync-stacks` to match our stack topology.
+
+### `git rebase-prefix`
+
+![git rebase-prefix demo](media-gen/media/rebase_prefix.gif)
+
+### `git evolve`
+
+![git evolve demo](media-gen/media/evolve.gif)
+
+### `git push-stack`
+
+![git push-stack demo](media-gen/media/push_stack.gif)
+
+### `git gh-align-pr-bases-and-sync-stacks`
+
+![git gh-align-pr-bases-and-sync-stacks demo](media-gen/media/gh_align_pr_bases_and_sync_stacks.gif)
+
+We also have other functionalities for mass pushing beyond stacks, and cleaning up the local and remote repos!
+
+<details>
+<summary><b>View More Demos</b></summary>
+
+### `git push-prefix`
+
+![git push-prefix demo](media-gen/media/push_prefix.gif)
+
+### `git prune-remote-prefix`
+
+![git prune-remote-prefix demo](media-gen/media/prune_remote_prefix.gif)
+
+### `git prune-local`
+
+![git prune-local demo](media-gen/media/prune_local.gif)
+
+</details>
+
 ## Setup
 
 1. **Install:** Run the automated installer, which clones the repo. *(It will automatically install [`pixi`](https://pixi.sh/) if you don't already have it.)*
@@ -48,7 +96,7 @@ You can invoke these scripts just like native Git commands:
 | **`git push-prefix <prefix> [opts]`**                                             | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git.                                                                                   |
 | **`git push-stack [opts]`**                                                       | **Stack Push.** Pushes all out-of-sync branches in the current topological stack (from trunk up to current branch). Passes extra args to git.                                                   |
 | **`git prune-remote-prefix <prefix> [target] [-n/--dry-run] [--prune-no-local]`** | **Remote Cleanup.** Deletes remote branches that are fully merged or squash-merged into `target` (default: `main`). Use `--prune-no-local` to also delete branches lacking a local counterpart. |
-| **`git prune-local-branches [-n/--dry-run]`**                                     | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone.                                                                                                              |
+| **`git prune-local [-n/--dry-run]`**                                              | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone.                                                                                                              |
 
 > **Note:** All commands support `--plain` (disables rich UI formatting) and `-y/--yes` (bypasses confirmation prompts).
 

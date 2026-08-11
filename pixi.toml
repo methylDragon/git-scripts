@@ -7,19 +7,22 @@ version = "0.1.0"
 
 [tasks]
 setup = "pre-commit install-hooks && pre-commit install"
-lint = "ruff check --fix src/ tests/ && pyright src/ tests/ && pre-commit run --all-files"
-format = "pyupgrade --py310-plus `find src tests -name '*.py'` && ruff format src/ tests/ && pre-commit run mdformat --all-files && pre-commit run markdownlint --all-files"
+lint = "ruff check --fix src/ tests/ media-gen/ && pyright src/ tests/ media-gen/ && pre-commit run --all-files"
+format = "ruff format src/ tests/ media-gen/ && pre-commit run mdformat --all-files && pre-commit run markdownlint --all-files"
 test = "pytest -n auto tests/"
 coverage = "pytest --cov=src/git_scripts --cov-report=term-missing tests/"
-git-rebase-prefix = "python -m git_scripts.cli rebase_prefix"
-git-push-prefix = "python -m git_scripts.cli push_prefix"
-git-push-stack = "python -m git_scripts.cli push_stack"
+git-rebase-prefix = "python -m git_scripts.cli rebase-prefix"
+git-push-prefix = "python -m git_scripts.cli push-prefix"
+git-push-stack = "python -m git_scripts.cli push-stack"
 git-evolve = "python -m git_scripts.cli evolve"
-git-prune-local-branches = "python -m git_scripts.cli prune_local_branches"
-git-prune-remote-prefix = "python -m git_scripts.cli prune_remote_prefix"
+git-prune-local = "python -m git_scripts.cli prune-local"
+git-prune-remote-prefix = "python -m git_scripts.cli prune-remote-prefix"
+
+# --- Media Generation ---
+media-gen = "python media-gen/generate.py"
+media-gen-all = "python media-gen/generate.py --all"
 
 [dependencies]
-pyupgrade = ">=3.19.1,<4"
 pyright = ">=1.1.300,<2"
 pygit2 = ">=1.19.3,<2"
 rich = ">=15.0.0,<16"
@@ -33,6 +36,8 @@ pre-commit = ">=4.6.1,<5"
 typer = ">=0.27.0,<0.28"
 filelock = ">=3.16.1,<4"
 act = ">=0.2.89,<0.3"
+vhs = ">=0.11.0,<0.12"
+pyfiglet = ">=1.0.4,<2"
 
 [pypi-dependencies]
 git-scripts = { path = ".", editable = true }

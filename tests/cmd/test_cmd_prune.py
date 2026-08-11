@@ -4,7 +4,7 @@ import pygit2
 from absl.testing import absltest
 
 from git_scripts.cmd.prune_local import execute_prune_local
-from git_scripts.cmd.prune_remote import execute_prune_remote
+from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
 from tests.helpers import GitTestRepo
 
 
@@ -121,8 +121,8 @@ class TestCmdPrune(absltest.TestCase):
                 ):
                     self.fail("git branch -D called during dry run")
 
-    @mock.patch("git_scripts.cmd.prune_remote.subprocess_run")
-    def test_execute_prune_remote_deletes_merged_branches(
+    @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
+    def test_execute_prune_remote_prefix_deletes_merged_branches(
         self, mock_subprocess_run
     ):
         # Create some remote branches
@@ -139,11 +139,11 @@ class TestCmdPrune(absltest.TestCase):
         self.repo.references.create("refs/remotes/origin/feat/2", f2_id)
         self.repo_helper.checkout("main")
 
-        # run prune_remote
+        # run prune_remote_prefix
         with mock.patch(
             "git_scripts.ui.UI.ask_choice", return_value="Delete all"
         ):
-            result = execute_prune_remote(
+            result = execute_prune_remote_prefix(
                 self.repo_helper.path, prefix="feat/"
             )
         self.assertTrue(result)
@@ -155,8 +155,8 @@ class TestCmdPrune(absltest.TestCase):
             check=True,
         )
 
-    @mock.patch("git_scripts.cmd.prune_remote.subprocess_run")
-    def test_execute_prune_remote_dry_run(self, mock_subprocess_run):
+    @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
+    def test_execute_prune_remote_prefix_dry_run(self, mock_subprocess_run):
         main_id = self.repo.revparse_single("main").id
         self.repo.references.create("refs/remotes/origin/main", main_id)
         self.repo.references.create("refs/remotes/origin/feat/1", main_id)
@@ -164,7 +164,7 @@ class TestCmdPrune(absltest.TestCase):
         with mock.patch(
             "git_scripts.ui.UI.ask_choice", return_value="Delete all"
         ):
-            result = execute_prune_remote(
+            result = execute_prune_remote_prefix(
                 self.repo_helper.path, prefix="feat/", dry_run=True
             )
         self.assertTrue(result)
@@ -174,8 +174,8 @@ class TestCmdPrune(absltest.TestCase):
             if args and args[0][0] == "git" and args[0][1] == "push":
                 self.fail("git push called during dry run")
 
-    @mock.patch("git_scripts.cmd.prune_remote.subprocess_run")
-    def test_execute_prune_remote_with_also_prune_no_local(
+    @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
+    def test_execute_prune_remote_prefix_with_also_prune_no_local(
         self, mock_subprocess_run
     ):
         main_id = self.repo.revparse_single("main").id
@@ -204,7 +204,7 @@ class TestCmdPrune(absltest.TestCase):
         with mock.patch(
             "git_scripts.ui.UI.ask_choice", return_value="Delete all"
         ):
-            result = execute_prune_remote(
+            result = execute_prune_remote_prefix(
                 self.repo_helper.path, prefix="feat/", also_prune_no_local=True
             )
         self.assertTrue(result)

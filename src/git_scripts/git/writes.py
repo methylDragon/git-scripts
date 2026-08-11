@@ -443,8 +443,8 @@ def prompt_and_push_branches(
             default="Push all",
         )
         match action:
-            case "Skip all":
-                ui.print("❌  Operation cancelled.")
+            case "Skip all" | None:
+                ui.print("⏭️  Push skipped.")
                 return True
             case "Select which to push":
                 branches_to_push = ui.ask_checkbox(
@@ -452,7 +452,7 @@ def prompt_and_push_branches(
                 )
 
     if not branches_to_push:
-        ui.print("❌  Operation cancelled.")
+        ui.print("⏭️  Push skipped.")
         return True
 
     opts_str = " ".join(push_opts) or "(none)"

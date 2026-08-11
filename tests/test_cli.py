@@ -46,8 +46,8 @@ class TestCli(absltest.TestCase):
             self.assertEqual(e.code, 0)
         mock_exec.assert_called_once()
 
-    @mock.patch("sys.argv", ["git-scripts", "prune-remote", "feat/"])
-    @mock.patch("git_scripts.cli.execute_prune_remote")
+    @mock.patch("sys.argv", ["git-scripts", "prune-remote-prefix", "feat/"])
+    @mock.patch("git_scripts.cli.execute_prune_remote_prefix")
     def test_main_routes_to_prune_remote_when_invoked(self, mock_exec):
         mock_exec.return_value = True
         try:
