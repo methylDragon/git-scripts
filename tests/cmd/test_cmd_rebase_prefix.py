@@ -27,6 +27,13 @@ class TestCmdRebasePrefix(absltest.TestCase):
         # Verify it restores to the initially checked-out branch
         self.repo_helper.checkout("test-chain-a")
 
+        # Hook the mock to verify branch is restored BEFORE push prompts
+        def verify_restored(*args, **kwargs):
+            current_branch = self.repo_helper.get_pygit2_repo().head.shorthand
+            self.assertEqual(current_branch, "test-chain-a")
+
+        mock_push.side_effect = verify_restored
+
         success = execute_rebase_prefix(
             repo_path=self.repo_helper.path,
             prefix="test-chain-",
@@ -36,6 +43,9 @@ class TestCmdRebasePrefix(absltest.TestCase):
             ui=ui,
         )
         self.assertTrue(success)
+
+        # Check that mock was called
+        mock_push.assert_called_once()
 
         # Check that we are back on test-chain-a
         current_branch = self.repo_helper.get_pygit2_repo().head.shorthand

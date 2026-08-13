@@ -582,6 +582,56 @@ def _verify_topology(
     return True, ordered, parent_map
 
 
+def _sync_gh_stack_checkout(repo_path: str, pr_number: str, ui: UI) -> None:
+    ui.print(f"\n🔄  Checking out PR #{pr_number} to ensure local tracking...")
+    try:
+        if not os.environ.get("GIT_SCRIPTS_DEMO"):
+            gh_stack_checkout(repo_path, pr_number)
+    except GhExecutionError as e:
+        if "not part of a stack on GitHub" in str(e):
+            ui.print(
+                "  ℹ️   PR is not part of a stack on GitHub (skipping checkout)"
+            )
+        else:
+            ui.print(f"  ⚠️   Checkout failed: [dim]{str(e)}[/dim]")
+
+
+def _sync_gh_stack_unstack(repo_path: str, ui: UI) -> None:
+    ui.print(
+        "\n🗑️  Unstacking current remote stack state to ensure "
+        "synchronization..."
+    )
+    try:
+        if not os.environ.get("GIT_SCRIPTS_DEMO"):
+            gh_stack_unstack(repo_path)
+        ui.print("  ✅  Unstacked successfully!")
+    except GhExecutionError as e:
+        if "not part of a stack" in str(e):
+            ui.print("  ✅  Unstacked successfully! (was not stacked)")
+        else:
+            ui.print(
+                f"  ⚠️   Unstack failed (might not be stacked): "
+                f"[dim]{str(e)}[/dim]"
+            )
+
+
+def _update_pr_state_from_creates(
+    creates: list[PrCreateAction], pr_state: dict[str, GitHubPr]
+) -> None:
+    for c in creates:
+        if c.url:
+            number = -1
+            parts = c.url.split("/")
+            if parts and parts[-1].isdigit():
+                number = int(parts[-1])
+            pr_state[c.branch] = GitHubPr(
+                headRefName=c.branch,
+                baseRefName=c.base,
+                url=c.url,
+                number=number,
+            )
+
+
 def _print_edits(edits: list[PrEditAction], ui: UI) -> None:
     if not edits:
         return
@@ -628,29 +678,9 @@ def _sync_gh_stack(
                     break
 
         if pr_number:
-            ui.print(
-                f"\n🔄  Checking out PR #{pr_number} to ensure "
-                "local tracking..."
-            )
-            try:
-                if not os.environ.get("GIT_SCRIPTS_DEMO"):
-                    gh_stack_checkout(repo_path, pr_number)
-            except GhExecutionError as e:
-                ui.print(f"  ⚠️   Checkout failed: [dim]{str(e)}[/dim]")
+            _sync_gh_stack_checkout(repo_path, pr_number, ui)
 
-        ui.print(
-            "\n🗑️  Unstacking current remote stack state to ensure "
-            "synchronization..."
-        )
-        try:
-            if not os.environ.get("GIT_SCRIPTS_DEMO"):
-                gh_stack_unstack(repo_path)
-            ui.print("  ✅  Unstacked successfully!")
-        except GhExecutionError as e:
-            ui.print(
-                f"  ⚠️   Unstack failed (might not be stacked): "
-                f"[dim]{str(e)}[/dim]"
-            )
+        _sync_gh_stack_unstack(repo_path, ui)
 
         ui.print("\n🚀  Linking stack on GitHub...")
         try:
@@ -776,6 +806,8 @@ def execute_align_pr_bases_and_sync_stacks(
         success_edits = _execute_edits(edits, repo_path, ui)
         success_creates = _execute_creates(creates, repo_path, ui)
         success = success_edits and success_creates
+
+        _update_pr_state_from_creates(creates, pr_state)
 
         if success:
             ui.print("\n🎉  All PR operations completed successfully!")
