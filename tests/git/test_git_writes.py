@@ -66,14 +66,12 @@ class TestGitWrites(absltest.TestCase):
         )
 
     @patch("git_scripts.git.writes.run_cmd")
-    @patch("builtins.input")
     def test_rebase_onto_succeeds_when_user_resolves_manually(
-        self, mock_input, mock_run_cmd
+        self, mock_run_cmd
     ):
         mock_run_cmd.side_effect = [GitExecutionError("Conflict"), ""]
         mock_ui = MagicMock()
         mock_ui.ask_choice.return_value = "Resolve manually, then continue"
-        mock_input.return_value = ""
 
         result = rebase_onto("onto_hash", "old_hash", "branch", ui=mock_ui)
         self.assertTrue(result)
@@ -84,9 +82,8 @@ class TestGitWrites(absltest.TestCase):
         )
 
     @patch("git_scripts.git.writes.run_cmd")
-    @patch("builtins.input")
     def test_rebase_onto_loops_when_continue_fails_then_succeeds(
-        self, mock_input, mock_run_cmd
+        self, mock_run_cmd
     ):
         # 1. First call is the initial rebase_onto (fails with conflict)
         # 2. Second call is the git rebase --continue (fails with conflict)
@@ -98,7 +95,6 @@ class TestGitWrites(absltest.TestCase):
         ]
         mock_ui = MagicMock()
         mock_ui.ask_choice.return_value = "Resolve manually, then continue"
-        mock_input.return_value = ""
 
         result = rebase_onto("onto_hash", "old_hash", "branch", ui=mock_ui)
         self.assertTrue(result)

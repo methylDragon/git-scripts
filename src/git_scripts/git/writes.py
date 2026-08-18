@@ -281,11 +281,10 @@ def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
                     "    [yellow]Please resolve the conflicts in another "
                     "terminal. (DO NOT run `git rebase --continue`)[/yellow]"
                 )
-                ui.print(
-                    "    [cyan]Press Enter here when the conflicts "
-                    "are completely resolved...[/cyan]"
+                ui.pause(
+                    "    [cyan]When the conflicts are completely "
+                    "resolved, press \\[[bold]ENTER[/bold]]...[/cyan]"
                 )
-                input()
 
                 try:
                     run_cmd(

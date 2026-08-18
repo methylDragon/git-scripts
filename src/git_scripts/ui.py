@@ -119,6 +119,28 @@ class UI:
         ans = questionary.checkbox(msg, choices=choices).ask()
         return ans if ans is not None else []
 
+    def pause(self, msg: str = "Press Enter to continue...") -> None:
+        """Pauses execution until the user presses Enter.
+
+        If auto_yes is True, bypasses prompt.
+        If plain mode is enabled, uses standard `input()`.
+        Otherwise, uses `console.input()` to support rich formatting.
+        """
+        if self.auto_yes:
+            return
+
+        if self.plain:
+            try:
+                input(f"{msg} ")
+            except EOFError:
+                pass
+            return
+
+        try:
+            self.console.input(f"{msg} ")
+        except EOFError:
+            pass
+
     def print(self, *args, **kwargs) -> None:
         """Proxies to console.print."""
         self.console.print(*args, **kwargs)
