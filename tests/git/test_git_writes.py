@@ -81,9 +81,10 @@ class TestGitWrites(absltest.TestCase):
             capture_output=False,
         )
 
+    @patch("git_scripts.git.writes._is_worktree_busy")
     @patch("git_scripts.git.writes.run_cmd")
     def test_rebase_onto_loops_when_continue_fails_then_succeeds(
-        self, mock_run_cmd
+        self, mock_run_cmd, mock_is_worktree_busy
     ):
         # 1. First call is the initial rebase_onto (fails with conflict)
         # 2. Second call is the git rebase --continue (fails with conflict)
@@ -93,11 +94,60 @@ class TestGitWrites(absltest.TestCase):
             GitExecutionError("Still Unresolved"),
             "",
         ]
+        mock_is_worktree_busy.return_value = True
         mock_ui = MagicMock()
         mock_ui.ask_choice.return_value = "Resolve manually, then continue"
 
         result = rebase_onto("onto_hash", "old_hash", "branch", ui=mock_ui)
         self.assertTrue(result)
+        self.assertEqual(mock_run_cmd.call_count, 3)
+
+    @patch("git_scripts.git.writes._is_worktree_busy")
+    @patch("git_scripts.git.writes.run_cmd")
+    def test_rebase_onto_handles_accidentally_continued_rebase(
+        self, mock_run_cmd, mock_is_worktree_busy
+    ):
+        mock_run_cmd.side_effect = [
+            GitExecutionError("Initial Conflict"),
+            GitExecutionError("fatal: No rebase in progress?"),
+        ]
+        mock_is_worktree_busy.return_value = False
+
+        mock_ui = MagicMock()
+        mock_ui.ask_choice.side_effect = [
+            "Resolve manually, then continue",
+            "Yes",
+        ]
+
+        result = rebase_onto("onto_hash", "old_hash", "branch", ui=mock_ui)
+        self.assertTrue(result)
+        self.assertEqual(mock_run_cmd.call_count, 2)
+        mock_is_worktree_busy.assert_called_once()
+        mock_ui.print.assert_any_call(
+            "    ✅  Rebase assumed finished. Continuing script..."
+        )
+
+    @patch("git_scripts.git.writes._is_worktree_busy")
+    @patch("git_scripts.git.writes.run_cmd")
+    def test_rebase_onto_handles_accidentally_aborted_rebase(
+        self, mock_run_cmd, mock_is_worktree_busy
+    ):
+        mock_run_cmd.side_effect = [
+            GitExecutionError("Initial Conflict"),
+            GitExecutionError("fatal: No rebase in progress?"),
+            "",
+        ]
+        mock_is_worktree_busy.return_value = False
+
+        mock_ui = MagicMock()
+        mock_ui.ask_choice.side_effect = [
+            "Resolve manually, then continue",
+            "No (Treat as aborted)",
+        ]
+
+        with self.assertRaises(GitExecutionError):
+            rebase_onto("onto_hash", "old_hash", "branch", ui=mock_ui)
+
         self.assertEqual(mock_run_cmd.call_count, 3)
 
     @patch("git_scripts.git.writes.run_cmd")

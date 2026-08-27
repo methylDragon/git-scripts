@@ -301,6 +301,36 @@ def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
                     ui.print("    ✅  Rebase finished. Continuing script...")
                     return True
                 except GitExecutionError as e:
+                    if not _is_worktree_busy(repo_path):
+                        ui.print(
+                            "    [yellow]⚠️  No active rebase detected.\n"
+                            "    It seems you may have already run "
+                            "`git rebase --continue` or `--abort` "
+                            "manually.[/yellow]"
+                        )
+                        ans2 = ui.ask_choice(
+                            "Did you successfully complete the rebase?",
+                            choices=["Yes", "No (Treat as aborted)"],
+                            default="Yes",
+                        )
+                        if ans2 == "Yes":
+                            ui.print(
+                                "    ✅  Rebase assumed finished. "
+                                "Continuing script..."
+                            )
+                            return True
+                        else:
+                            ui.print("    ❌  Rebase marked as aborted.")
+                            try:
+                                run_cmd(
+                                    ["git", "rebase", "--abort"],
+                                    cwd=repo_path,
+                                    check=False,
+                                )
+                            except GitExecutionError:
+                                pass
+                            raise e
+
                     err_msg = str(e)
                     if "Error:" in err_msg:
                         err_msg = err_msg.split("Error:", 1)[1].strip()
