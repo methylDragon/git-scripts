@@ -7,6 +7,7 @@ from functools import cached_property
 
 import questionary
 from rich.console import Console
+from rich.progress import Progress
 from rich.prompt import Confirm
 
 
@@ -16,6 +17,19 @@ class UI:
 
     plain: bool = False
     auto_yes: bool = False
+    active_progress: Progress | None = None
+
+    @contextmanager
+    def suspend_progress(self):
+        """Temporarily stops active progress bar to allow clean prompts."""
+        if self.active_progress:
+            self.active_progress.stop()
+            try:
+                yield
+            finally:
+                self.active_progress.start()
+        else:
+            yield
 
     @cached_property
     def console(self) -> Console:
@@ -46,7 +60,8 @@ class UI:
                 print()  # Ensure newline for test runners
                 return False
 
-        return Confirm.ask(msg)
+        with self.suspend_progress():
+            return Confirm.ask(msg)
 
     def ask_choice(
         self, msg: str, choices: list[str], default: str | None = None
@@ -86,7 +101,10 @@ class UI:
                     print()
                     return None
 
-        return questionary.select(msg, choices=choices, default=default).ask()
+        with self.suspend_progress():
+            return questionary.select(
+                msg, choices=choices, default=default
+            ).ask()
 
     def ask_checkbox(
         self, msg: str, choices: Sequence[str | questionary.Choice]
@@ -116,8 +134,9 @@ class UI:
                     selected.append(val)
             return selected
 
-        ans = questionary.checkbox(msg, choices=choices).ask()
-        return ans if ans is not None else []
+        with self.suspend_progress():
+            ans = questionary.checkbox(msg, choices=choices).ask()
+            return ans if ans is not None else []
 
     def pause(self, msg: str = "Press Enter to continue...") -> None:
         """Pauses execution until the user presses Enter.
@@ -136,10 +155,11 @@ class UI:
                 pass
             return
 
-        try:
-            self.console.input(f"{msg} ")
-        except EOFError:
-            pass
+        with self.suspend_progress():
+            try:
+                self.console.input(f"{msg} ")
+            except EOFError:
+                pass
 
     def print(self, *args, **kwargs) -> None:
         """Proxies to console.print."""

@@ -62,7 +62,8 @@ class TestGitWrites(absltest.TestCase):
 
         self.assertEqual(cm.exception.code, 1)
         mock_ui.print.assert_any_call(
-            "    [red]❌  Conflict or error.\nConflict[/red]"
+            "    [red]❌  Conflict or error on branch '[bold]branch[/bold]'.\n"
+            "Conflict[/red]"
         )
 
     @patch("git_scripts.git.writes.run_cmd")

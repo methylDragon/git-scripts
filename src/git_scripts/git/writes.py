@@ -196,7 +196,7 @@ def _detach_worktrees(prefix: str = "", repo_path: str = ".") -> WorktreeState:
             try:
                 sha = run_cmd(["git", "rev-parse", branch_name], cwd=repo_path)
                 print(
-                    f"    Detaching '{branch_name}' in worktree "
+                    f"    🍂  Detaching '{branch_name}' in worktree "
                     f"'{current_wt}'..."
                 )
                 run_cmd(["git", "checkout", sha, "--detach"], cwd=current_wt)
@@ -219,11 +219,10 @@ def _reattach_worktrees(
     """Re-checks out branches in their respective worktrees."""
     for wt, branch in detached_map.items():
         try:
+            print(f"    🌱  Reattaching '{branch}' in worktree '{wt}'...")
             run_cmd(["git", "checkout", branch], cwd=wt)
         except GitExecutionError as e:
-            print(
-                f"⚠️  Warning: Could not re-attach '{branch}' in '{wt}'.\n{e}"
-            )
+            print(f"⚠️  Warning: Could not reattach '{branch}' in '{wt}'.\n{e}")
 
 
 @contextmanager
@@ -244,7 +243,9 @@ def manage_worktrees(
             _reattach_worktrees(state.detached_map, repo_path)
 
 
-def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
+def _handle_rebase_conflict(
+    e: GitExecutionError, repo_path: str, ui, branch: str = ""
+) -> bool:
     """Handles git rebase conflicts by prompting the user for resolution."""
     if not ui:
         try:
@@ -256,7 +257,9 @@ def _handle_rebase_conflict(e: GitExecutionError, repo_path: str, ui) -> bool:
     err_msg = str(e)
     if "Error:" in err_msg:
         err_msg = err_msg.split("Error:", 1)[1].strip()
-    ui.print(f"    [red]❌  Conflict or error.\n{err_msg}[/red]")
+
+    branch_msg = f" on branch '[bold]{branch}[/bold]'" if branch else ""
+    ui.print(f"    [red]❌  Conflict or error{branch_msg}.\n{err_msg}[/red]")
 
     while True:
         ans = ui.ask_choice(
@@ -375,7 +378,7 @@ def rebase_onto(
         )
         return True
     except GitExecutionError as e:
-        return _handle_rebase_conflict(e, repo_path, ui)
+        return _handle_rebase_conflict(e, repo_path, ui, branch=branch)
 
 
 def rebase_standard(
@@ -399,7 +402,7 @@ def rebase_standard(
         )
         return True
     except GitExecutionError as e:
-        return _handle_rebase_conflict(e, repo_path, ui)
+        return _handle_rebase_conflict(e, repo_path, ui, branch=branch)
 
 
 def push_branches(

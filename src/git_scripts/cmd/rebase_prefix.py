@@ -170,34 +170,38 @@ def execute_rebase_prefix(
     ) as wt_state:
         failed_branches = wt_state.failed_branches
         with Progress(console=ui.console, transient=True) as progress:
+            ui.active_progress = progress
             total_tips = len(analyzer.tips)
             task = progress.add_task(
                 "[cyan]Rebasing stacks...", total=total_tips
             )
-            for i, branch in enumerate(analyzer.tips, 1):
-                progress.update(
-                    task,
-                    description=(
-                        f"[cyan]Processing Stack ({i}/{total_tips}): "
-                        f"{branch}..."
-                    ),
-                )
-                _process_branch_rebase(
-                    branch,
-                    repo_path,
-                    prefix,
-                    target,
-                    all_worktrees,
-                    failed_branches,
-                    analyzer,
-                    failed_log,
-                    skipped_log,
-                    success_log,
-                    branches_to_delete,
-                    branches_to_keep,
-                    ui,
-                )
-                progress.advance(task)
+            try:
+                for i, branch in enumerate(analyzer.tips, 1):
+                    progress.update(
+                        task,
+                        description=(
+                            f"[cyan]Processing Stack ({i}/{total_tips}): "
+                            f"{branch}..."
+                        ),
+                    )
+                    _process_branch_rebase(
+                        branch,
+                        repo_path,
+                        prefix,
+                        target,
+                        all_worktrees,
+                        failed_branches,
+                        analyzer,
+                        failed_log,
+                        skipped_log,
+                        success_log,
+                        branches_to_delete,
+                        branches_to_keep,
+                        ui,
+                    )
+                    progress.advance(task)
+            finally:
+                ui.active_progress = None
 
     _print_batch_summary(ui, success_log, skipped_log, failed_log)
 
