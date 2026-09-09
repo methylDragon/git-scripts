@@ -142,7 +142,11 @@ def _is_worktree_busy(current_wt: str) -> bool:
         return False
 
 
-def _detach_worktrees(prefix: str = "", repo_path: str = ".") -> WorktreeState:
+def _detach_worktrees(
+    prefix: str = "",
+    repo_path: str = ".",
+    target_branches: list[str] | None = None,
+) -> WorktreeState:
     """Detaches HEAD in all inactive worktrees to free branches.
 
     Git strictly locks branches that are checked out in any worktree,
@@ -175,6 +179,12 @@ def _detach_worktrees(prefix: str = "", repo_path: str = ".") -> WorktreeState:
             current_wt = line[len("worktree ") :]
         elif line.startswith("branch refs/heads/"):
             branch_name = line[len("branch refs/heads/") :]
+
+            if (
+                target_branches is not None
+                and branch_name not in target_branches
+            ):
+                continue
 
             if prefix and not branch_name.startswith(prefix):
                 continue
@@ -227,7 +237,10 @@ def _reattach_worktrees(
 
 @contextmanager
 def manage_worktrees(
-    prefix: str = "", active: bool = True, repo_path: str = "."
+    prefix: str = "",
+    active: bool = True,
+    repo_path: str = ".",
+    target_branches: list[str] | None = None,
 ) -> Generator[WorktreeState, None, None]:
     """Temporarily detaches branches in other worktrees during execution.
 
@@ -235,7 +248,7 @@ def manage_worktrees(
     """
     state = WorktreeState(detached_map={}, failed_branches=set())
     if active:
-        state = _detach_worktrees(prefix, repo_path)
+        state = _detach_worktrees(prefix, repo_path, target_branches)
     try:
         yield state
     finally:

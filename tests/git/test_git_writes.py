@@ -44,6 +44,40 @@ class TestGitWrites(absltest.TestCase):
         out = run_cmd(["git", "branch", "--show-current"], cwd=worktree_path)
         self.assertEqual(out, "test-chain-a")
 
+    def test_manage_worktrees_with_target_branches_only_detaches_targets(self):
+        # Create two worktrees
+        wt_a = os.path.join(self.repo_helper.temp_dir.name, "wt_a")
+        self.repo_helper.create_worktree(wt_a, "test-chain-a")
+
+        run_cmd(
+            ["git", "branch", "test-chain-b", "HEAD"],
+            cwd=self.repo_helper.path,
+            check=False,
+        )
+        wt_b = os.path.join(self.repo_helper.temp_dir.name, "wt_b")
+        self.repo_helper.create_worktree(wt_b, "test-chain-b")
+
+        # Use manage_worktrees targeting only "test-chain-a"
+        with manage_worktrees(
+            active=True,
+            repo_path=self.repo_helper.path,
+            target_branches=["test-chain-a"],
+        ) as wt_state:
+            # wt_a should be detached
+            self.assertIn(wt_a, wt_state.detached_map)
+            self.assertEqual(wt_state.detached_map[wt_a], "test-chain-a")
+            out_a = run_cmd(["git", "branch", "--show-current"], cwd=wt_a)
+            self.assertEqual(out_a, "")  # detached HEAD
+
+            # wt_b should not be detached
+            self.assertNotIn(wt_b, wt_state.detached_map)
+            out_b = run_cmd(["git", "branch", "--show-current"], cwd=wt_b)
+            self.assertEqual(out_b, "test-chain-b")
+
+        # After exiting the context manager, both should be reattached
+        out_a = run_cmd(["git", "branch", "--show-current"], cwd=wt_a)
+        self.assertEqual(out_a, "test-chain-a")
+
     @patch("git_scripts.git.writes.run_cmd")
     def test_rebase_onto_returns_true_when_rebase_succeeds(self, mock_run_cmd):
         mock_run_cmd.return_value = ""

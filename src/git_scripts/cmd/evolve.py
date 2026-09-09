@@ -350,11 +350,19 @@ def _evolve_stacks(
     failed_log = []
     successfully_evolved_branches = []
 
-    with manage_worktrees(active=True, repo_path=repo_path) as wt_state:
+    repo = get_repo(repo_path)
+    implicated_branches = set()
+    for tip in analyzer.tips:
+        implicated_branches.update(get_stack_branches(repo, tip))
+
+    with manage_worktrees(
+        active=True,
+        repo_path=repo_path,
+        target_branches=list(implicated_branches),
+    ) as wt_state:
         failed_branches = wt_state.failed_branches
         for tip in analyzer.tips:
             ui.print(f"🔗  Reconnecting stack '{tip}'...")
-            repo = get_repo(repo_path)
             stack_refs = get_stack_branches(repo, tip)
 
             # Check if any branch in this stack failed to detach
