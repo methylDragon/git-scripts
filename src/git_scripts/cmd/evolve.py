@@ -10,9 +10,9 @@ from git_scripts.git.reads import (
     get_stack_branches,
 )
 from git_scripts.git.topology import TopologyAnalyzer
+from git_scripts.git.worktrees import manage_worktrees
 from git_scripts.git.writes import (
     GitExecutionError,
-    manage_worktrees,
     prompt_and_push_branches,
     rebase_onto,
     run_cmd,

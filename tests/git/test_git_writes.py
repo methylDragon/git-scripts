@@ -3,9 +3,9 @@ from unittest.mock import MagicMock, patch
 
 from absl.testing import absltest
 
+from git_scripts.git.worktrees import manage_worktrees
 from git_scripts.git.writes import (
     GitExecutionError,
-    manage_worktrees,
     rebase_onto,
     rebase_standard,
     run_cmd,
@@ -116,7 +116,7 @@ class TestGitWrites(absltest.TestCase):
             capture_output=False,
         )
 
-    @patch("git_scripts.git.writes._is_worktree_busy")
+    @patch("git_scripts.git.worktrees.is_worktree_busy")
     @patch("git_scripts.git.writes.run_cmd")
     def test_rebase_onto_loops_when_continue_fails_then_succeeds(
         self, mock_run_cmd, mock_is_worktree_busy
@@ -137,7 +137,7 @@ class TestGitWrites(absltest.TestCase):
         self.assertTrue(result)
         self.assertEqual(mock_run_cmd.call_count, 3)
 
-    @patch("git_scripts.git.writes._is_worktree_busy")
+    @patch("git_scripts.git.worktrees.is_worktree_busy")
     @patch("git_scripts.git.writes.run_cmd")
     def test_rebase_onto_handles_accidentally_continued_rebase(
         self, mock_run_cmd, mock_is_worktree_busy
@@ -162,7 +162,7 @@ class TestGitWrites(absltest.TestCase):
             "    ✅  Rebase assumed finished. Continuing script..."
         )
 
-    @patch("git_scripts.git.writes._is_worktree_busy")
+    @patch("git_scripts.git.worktrees.is_worktree_busy")
     @patch("git_scripts.git.writes.run_cmd")
     def test_rebase_onto_handles_accidentally_aborted_rebase(
         self, mock_run_cmd, mock_is_worktree_busy

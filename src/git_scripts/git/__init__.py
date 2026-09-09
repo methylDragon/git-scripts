@@ -9,9 +9,9 @@ from git_scripts.git.reads import (
     get_stack_branches,
     is_obsolete,
 )
+from git_scripts.git.worktrees import manage_worktrees
 from git_scripts.git.writes import (
     GitExecutionError,
-    manage_worktrees,
     push_branches,
     rebase_onto,
     rebase_standard,

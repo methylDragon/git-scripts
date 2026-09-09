@@ -13,10 +13,9 @@ from git_scripts.git.reads import (
     is_obsolete,
 )
 from git_scripts.git.topology import TopologyAnalyzer
+from git_scripts.git.worktrees import is_in_another_worktree, manage_worktrees
 from git_scripts.git.writes import (
     GitExecutionError,
-    is_in_another_worktree,
-    manage_worktrees,
     prompt_and_push_branches,
     rebase_onto,
     rebase_standard,
