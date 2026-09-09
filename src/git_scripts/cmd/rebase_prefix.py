@@ -81,6 +81,132 @@ def _print_batch_summary(ui, success_log, skipped_log, failed_log) -> None:
     )
 
 
+def execute_rebase_batch(
+    repo_path: str,
+    branches: list[str],
+    target: str = "main",
+    all_worktrees: bool = False,
+    auto_delete: bool = False,
+    ui: UI | None = None,
+    prefix: str = "",
+) -> bool:
+    """Executes batch rebase for a specific list of branches onto target."""
+    if ui is None:
+        ui = UI()
+
+    repo = pygit2.Repository(repo_path)
+    start_branch = ""
+    try:
+        if not repo.head_is_detached and not repo.head_is_unborn:
+            start_branch = repo.head.shorthand
+    except pygit2.GitError:
+        pass
+
+    if not update_target(repo_path, target, ui):
+        if start_branch:
+            try:
+                run_cmd(["git", "checkout", start_branch], cwd=repo_path)
+            except GitExecutionError:
+                pass
+        return False
+
+    if not branches:
+        ui.print("  [yellow]No matching branches found.[/yellow]")
+        return True
+
+    analyzer = TopologyAnalyzer(repo_path, branches)
+    ui.print(f"  [bold]Found {len(analyzer.tips)} stack tips.[/bold]")
+
+    start_time = time.time()
+    analyzer.analyze_obsolescence(target, ui=ui)
+    elapsed = time.time() - start_time
+    ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
+
+    success_log = []
+    skipped_log = []
+    failed_log = []
+    branches_to_delete: set[str] = set()
+    branches_to_keep: set[str] = set()
+
+    if all_worktrees:
+        ui.print(
+            "[dim]🔄  Detaching worktrees for cross-worktree rebase...[/dim]"
+        )
+
+    branch_pool = set(branches)
+
+    with manage_worktrees(
+        prefix=prefix,
+        active=all_worktrees,
+        repo_path=repo_path,
+        target_branches=branches,
+    ) as wt_state:
+        failed_branches = wt_state.failed_branches
+        with Progress(console=ui.console, transient=True) as progress:
+            ui.active_progress = progress
+            total_tips = len(analyzer.tips)
+            task = progress.add_task(
+                "[cyan]Rebasing stacks...", total=total_tips
+            )
+            try:
+                for i, branch in enumerate(analyzer.tips, 1):
+                    progress.update(
+                        task,
+                        description=(
+                            f"[cyan]Processing Stack ({i}/{total_tips}): "
+                            f"{branch}..."
+                        ),
+                    )
+                    _process_branch_rebase(
+                        branch=branch,
+                        repo_path=repo_path,
+                        prefix=prefix,
+                        target=target,
+                        all_worktrees=all_worktrees,
+                        failed_branches=failed_branches,
+                        analyzer=analyzer,
+                        failed_log=failed_log,
+                        skipped_log=skipped_log,
+                        success_log=success_log,
+                        branches_to_delete=branches_to_delete,
+                        branches_to_keep=branches_to_keep,
+                        ui=ui,
+                        branch_pool=branch_pool,
+                    )
+                    progress.advance(task)
+            finally:
+                ui.active_progress = None
+
+    _print_batch_summary(ui, success_log, skipped_log, failed_log)
+
+    _delete_merged(
+        branches_to_delete, branches_to_keep, auto_delete, ui, repo_path
+    )
+
+    if start_branch:
+        try:
+            run_cmd(["git", "checkout", start_branch], cwd=repo_path)
+        except GitExecutionError:
+            pass
+
+    if branches_to_keep:
+        prompt_and_push_branches(
+            branches=list(branches_to_keep),
+            ui=ui,
+            push_opts=["--force-with-lease"],
+            repo_path=repo_path,
+            prompt_title=(
+                f"Push {len(branches_to_keep)} updated branches to origin?"
+            ),
+            panel_title=(
+                f"[bold cyan]Local branches updated "
+                f"({len(branches_to_keep)})[/bold cyan]"
+            ),
+        )
+
+    return len(failed_log) == 0
+
+
 def execute_rebase_prefix(
     repo_path: str,
     prefix: str,
@@ -123,114 +249,19 @@ def execute_rebase_prefix(
         return False
 
     repo = pygit2.Repository(repo_path)
-    start_branch = ""
-    try:
-        if not repo.head_is_detached and not repo.head_is_unborn:
-            start_branch = repo.head.shorthand
-    except pygit2.GitError:
-        pass
-
-    if not update_target(repo_path, target, ui):
-        if start_branch:
-            try:
-                run_cmd(["git", "checkout", start_branch], cwd=repo_path)
-            except GitExecutionError:
-                pass
-        return False
-
     ui.print(f"[dim]🔍  Scanning 'refs/heads/{prefix}*'...[/dim]")
 
     all_branches = _find_matching_branches(repo, prefix, target)
 
-    if not all_branches:
-        ui.print("  [yellow]No matching branches found.[/yellow]")
-        return True
-
-    analyzer = TopologyAnalyzer(repo_path, all_branches)
-    ui.print(f"  [bold]Found {len(analyzer.tips)} stack tips.[/bold]")
-
-    start_time = time.time()
-    analyzer.analyze_obsolescence(target, ui=ui)
-    elapsed = time.time() - start_time
-    ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
-
-    success_log = []
-    skipped_log = []
-    failed_log = []
-    branches_to_delete: set[str] = set()
-    branches_to_keep: set[str] = set()
-
-    if all_worktrees:
-        ui.print(
-            "[dim]🔄  Detaching worktrees for cross-worktree rebase...[/dim]"
-        )
-
-    with manage_worktrees(
-        prefix, active=all_worktrees, repo_path=repo_path
-    ) as wt_state:
-        failed_branches = wt_state.failed_branches
-        with Progress(console=ui.console, transient=True) as progress:
-            ui.active_progress = progress
-            total_tips = len(analyzer.tips)
-            task = progress.add_task(
-                "[cyan]Rebasing stacks...", total=total_tips
-            )
-            try:
-                for i, branch in enumerate(analyzer.tips, 1):
-                    progress.update(
-                        task,
-                        description=(
-                            f"[cyan]Processing Stack ({i}/{total_tips}): "
-                            f"{branch}..."
-                        ),
-                    )
-                    _process_branch_rebase(
-                        branch,
-                        repo_path,
-                        prefix,
-                        target,
-                        all_worktrees,
-                        failed_branches,
-                        analyzer,
-                        failed_log,
-                        skipped_log,
-                        success_log,
-                        branches_to_delete,
-                        branches_to_keep,
-                        ui,
-                    )
-                    progress.advance(task)
-            finally:
-                ui.active_progress = None
-
-    _print_batch_summary(ui, success_log, skipped_log, failed_log)
-
-    _delete_merged(
-        branches_to_delete, branches_to_keep, auto_delete, ui, repo_path
+    return execute_rebase_batch(
+        repo_path=repo_path,
+        branches=all_branches,
+        target=target,
+        all_worktrees=all_worktrees,
+        auto_delete=auto_delete,
+        ui=ui,
+        prefix=prefix,
     )
-
-    if start_branch:
-        try:
-            run_cmd(["git", "checkout", start_branch], cwd=repo_path)
-        except GitExecutionError:
-            pass
-
-    if branches_to_keep:
-        prompt_and_push_branches(
-            branches=list(branches_to_keep),
-            ui=ui,
-            push_opts=["--force-with-lease"],
-            repo_path=repo_path,
-            prompt_title=(
-                f"Push {len(branches_to_keep)} updated branches to origin?"
-            ),
-            panel_title=(
-                f"[bold cyan]Local branches updated "
-                f"({len(branches_to_keep)})[/bold cyan]"
-            ),
-        )
-
-    return len(failed_log) == 0
 
 
 def _determine_rebase_strategy(
@@ -307,9 +338,12 @@ def _process_branch_rebase(
     branches_to_delete,
     branches_to_keep,
     ui,
+    branch_pool: set[str] | None = None,
 ):
     repo = pygit2.Repository(repo_path)
-    stack_refs = get_stack_branches(repo, branch, prefix)
+    stack_refs = get_stack_branches(
+        repo, branch, prefix, branch_pool=branch_pool
+    )
 
     if not all_worktrees:
         blocking_branch = None
@@ -330,7 +364,12 @@ def _process_branch_rebase(
             )
             failed_log.append(
                 format_stack_tree(
-                    repo, branch, prefix, target, filter_merged_in_target=False
+                    repo,
+                    branch,
+                    prefix,
+                    target,
+                    filter_merged_in_target=False,
+                    allowed_refs=branch_pool,
                 )
             )
             return
@@ -342,7 +381,12 @@ def _process_branch_rebase(
         ui.print("    [red]⚠️  Skipping due to busy or dirty worktree.[/red]")
         failed_log.append(
             format_stack_tree(
-                repo, branch, prefix, target, filter_merged_in_target=False
+                repo,
+                branch,
+                prefix,
+                target,
+                filter_merged_in_target=False,
+                allowed_refs=branch_pool,
             )
         )
         return
@@ -352,7 +396,12 @@ def _process_branch_rebase(
     if res.action == RebaseAction.SKIP:
         skipped_log.append(
             format_stack_tree(
-                repo, branch, prefix, target, filter_merged_in_target=False
+                repo,
+                branch,
+                prefix,
+                target,
+                filter_merged_in_target=False,
+                allowed_refs=branch_pool,
             )
         )
         for ref in stack_refs:
@@ -386,7 +435,12 @@ def _process_branch_rebase(
 
             success_log.append(
                 format_stack_tree(
-                    repo, branch, prefix, target, filter_merged_in_target=True
+                    repo,
+                    branch,
+                    prefix,
+                    target,
+                    filter_merged_in_target=True,
+                    allowed_refs=branch_pool,
                 )
             )
         except Exception:
@@ -394,7 +448,12 @@ def _process_branch_rebase(
     else:
         failed_log.append(
             format_stack_tree(
-                repo, branch, prefix, target, filter_merged_in_target=False
+                repo,
+                branch,
+                prefix,
+                target,
+                filter_merged_in_target=False,
+                allowed_refs=branch_pool,
             )
         )
 

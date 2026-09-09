@@ -278,6 +278,7 @@ def get_stack_branches(
     tip_name: str,
     prefix: str = "",
     merged_in_target: str | None = None,
+    branch_pool: set[str] | None = None,
 ) -> set[str]:
     """Returns local branches fully merged into the specified tip/target."""
     tip_commit = repo.revparse_single(tip_name)
@@ -287,6 +288,8 @@ def get_stack_branches(
             continue
         short_name = ref[11:]
         if prefix and not short_name.startswith(prefix):
+            continue
+        if branch_pool is not None and short_name not in branch_pool:
             continue
 
         try:
@@ -307,11 +310,15 @@ def format_stack_tree(
     allowed_refs: set[str] | None = None,
 ) -> str:
     """Generates an ASCII hierarchy tree representing the branch stack."""
-    stack_refs = get_stack_branches(repo, tip, prefix)
+    stack_refs = get_stack_branches(
+        repo, tip, prefix, branch_pool=allowed_refs
+    )
 
     target_refs = set()
     if filter_merged_in_target and target:
-        target_refs = get_stack_branches(repo, target, prefix)
+        target_refs = get_stack_branches(
+            repo, target, prefix, branch_pool=allowed_refs
+        )
 
     children = []
     for ref in stack_refs:

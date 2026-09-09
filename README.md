@@ -15,7 +15,7 @@ We'll showcase its usefulness with a typical workflow of trying to create a stac
 
 We'll:
 
-1. **Pull and rebase:**: Pull the latest changes and rebase our stacks using `git rebase-prefix`.
+1. **Pull and rebase:**: Pull the latest changes and rebase our stacks using `git rebase-stack` or `git rebase-prefix`.
 1. **Evolve:**: Rewire any orphaned stacks we generate if we ever need to amend using `git evolve`.
 1. **Push:**: Mass push branches in the stack using `git push-prefix` or `git push-stack`.
 1. **Sync:**: Now that the branches are on GitHub, automatically create PRs and align GitHub stacks using `git gh-align-pr-bases-and-sync-stacks` to match our stack topology.
@@ -91,6 +91,7 @@ You can invoke these scripts just like native Git commands:
 
 | Command                                                                           | Description                                                                                                                                                                                     |
 | :-------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`git rebase-stack [target] [--all-worktrees] [--auto-delete]`**                 | **Stack Update.** Rebases the current branch's linear topological stack onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream.                           |
 | **`git rebase-prefix <prefix> [target] [--all-worktrees] [--auto-delete]`**       | **Batch Update.** Rebases all stacks matching `prefix` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream.                                            |
 | **`git evolve [old_hash]`**                                                       | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted.                       |
 | **`git push-prefix <prefix> [opts]`**                                             | **Batch Push.** Pushes all branches matching `prefix`. Passes extra args (e.g., `--force-with-lease`) to git.                                                                                   |
@@ -113,7 +114,7 @@ These commands are strictly for GitHub repositories and require the [GitHub CLI 
 
 If you heavily utilize `git worktree` for stacked PRs, you might run into Git lock errors when trying to update a branch that is currently checked out in another worktree.
 
-The `git rebase-prefix` command accepts an `--all-worktrees` flag, while `git evolve` handles worktrees **automatically**. When active, the tool detects if any branches in your stack are checked out in other worktrees. It safely detaches those worktrees, performs the complex topology rebases, and then cleanly re-checks out the updated branches in their original worktrees.
+The `git rebase-stack` and `git rebase-prefix` commands accept an `--all-worktrees` flag, while `git evolve` handles worktrees **automatically**. When active, the tool detects if any branches in your stack are checked out in other worktrees. It safely detaches those worktrees, performs the complex topology rebases, and then cleanly re-checks out the updated branches in their original worktrees.
 
 ## Testing
 

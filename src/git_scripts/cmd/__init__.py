@@ -5,6 +5,7 @@ from git_scripts.cmd.prune_local import execute_prune_local
 from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
 from git_scripts.cmd.push_prefix import execute_push_prefix
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
+from git_scripts.cmd.rebase_stack import execute_rebase_stack
 
 __all__ = [
     "execute_evolve",
@@ -12,4 +13,5 @@ __all__ = [
     "execute_prune_remote_prefix",
     "execute_push_prefix",
     "execute_rebase_prefix",
+    "execute_rebase_stack",
 ]

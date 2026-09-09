@@ -13,9 +13,61 @@ from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
 from git_scripts.cmd.push_prefix import execute_push_prefix
 from git_scripts.cmd.push_stack import execute_push_stack
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
+from git_scripts.cmd.rebase_stack import execute_rebase_stack
 from git_scripts.ui import UI
 
 app = typer.Typer(help="Git Stack Utilities", add_completion=False)
+
+
+@app.command("rebase-stack")
+def rebase_stack(
+    target: Annotated[
+        str,
+        typer.Argument(
+            help="Target branch to rebase onto (defaults to 'main')"
+        ),
+    ] = "main",
+    all_worktrees: Annotated[
+        bool, typer.Option("--all-worktrees", help="Cross-worktree rebase")
+    ] = False,
+    auto_delete: Annotated[
+        bool, typer.Option("--auto-delete", help="Auto delete merged branches")
+    ] = False,
+    plain: Annotated[
+        bool,
+        typer.Option(
+            "--plain",
+            help="Disable rich formatting and use plain text prompts",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "-y", "--yes", help="Automatically bypass confirmation prompts"
+        ),
+    ] = False,
+    target_opt: Annotated[
+        str | None,
+        typer.Option(
+            "--target",
+            help="Target branch (alternative flag)",
+            hidden=True,
+        ),
+    ] = None,
+):
+    """Batch rebases the current branch stack onto a target branch."""
+    ui = UI(plain=plain, auto_yes=yes)
+
+    effective_target = target_opt if target_opt is not None else target
+
+    success = execute_rebase_stack(
+        repo_path=".",
+        target=effective_target,
+        all_worktrees=all_worktrees,
+        auto_delete=auto_delete,
+        ui=ui,
+    )
+    raise typer.Exit(code=0 if success else 1)
 
 
 @app.command("rebase-prefix")

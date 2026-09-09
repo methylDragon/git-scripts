@@ -55,3 +55,13 @@ class TestCli(absltest.TestCase):
         except SystemExit as e:
             self.assertEqual(e.code, 0)
         mock_exec.assert_called_once()
+
+    @mock.patch("sys.argv", ["git-scripts", "rebase-stack"])
+    @mock.patch("git_scripts.cli.execute_rebase_stack")
+    def test_main_routes_to_rebase_stack_when_invoked(self, mock_exec):
+        mock_exec.return_value = True
+        try:
+            main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        mock_exec.assert_called_once()
