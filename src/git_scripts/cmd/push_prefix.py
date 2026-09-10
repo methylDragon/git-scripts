@@ -2,8 +2,9 @@
 
 import pygit2
 
+from git_scripts.cmd.shared import resolve_branches_to_push
 from git_scripts.git.core import GitExecutionError, run_cmd
-from git_scripts.git.rebase import prompt_and_push_branches
+from git_scripts.git.remote import push_branches
 from git_scripts.ui import UI
 
 
@@ -57,10 +58,21 @@ def execute_push_prefix(
         repo, prefix
     )
 
-    return prompt_and_push_branches(
+    resolved_branches = resolve_branches_to_push(
         branches=branches_to_push,
         ui=ui,
-        push_opts=push_opts,
+    )
+
+    if not resolved_branches:
+        if up_to_date_count > 0:
+            ui.print(
+                f"✅  {up_to_date_count} branch(es) already up-to-date. "
+                "No branches to push."
+            )
+        return True
+
+    return push_branches(
+        branches=resolved_branches,
+        options=push_opts,
         repo_path=repo_path,
-        skipped_count=up_to_date_count,
     )

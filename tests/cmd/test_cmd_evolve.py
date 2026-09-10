@@ -34,7 +34,7 @@ class TestCmdEvolve(absltest.TestCase):
         self.old_hash = str(old_head)
         self.new_hash = str(self.repo.revparse_single("HEAD").id)
 
-    @mock.patch("git_scripts.cmd.evolve.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.evolve.push_branches")
     def test_execute_evolve_restores_stack_when_given_explicit_old_hash(
         self, mock_push
     ):
@@ -49,7 +49,7 @@ class TestCmdEvolve(absltest.TestCase):
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
 
-    @mock.patch("git_scripts.cmd.evolve.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.evolve.push_branches")
     def test_execute_evolve_restores_stack_by_finding_old_base_via_reflog(
         self, mock_push
     ):
@@ -62,7 +62,7 @@ class TestCmdEvolve(absltest.TestCase):
         merge_base = self.repo.merge_base(c_commit.id, a_commit.id)
         self.assertEqual(merge_base, a_commit.id)
 
-    @mock.patch("git_scripts.cmd.evolve.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.evolve.push_branches")
     def test_execute_evolve_restores_stack_via_remote_tracking_branch(
         self, mock_push
     ):

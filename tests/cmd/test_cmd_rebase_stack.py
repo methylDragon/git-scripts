@@ -24,7 +24,7 @@ class TestCmdRebaseStack(absltest.TestCase):
     def tearDown(self):
         self.repo_helper.cleanup()
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
     def test_execute_rebase_stack_linear_chain(self, mock_push):
         # Master template:
         # main
@@ -74,7 +74,7 @@ class TestCmdRebaseStack(absltest.TestCase):
             self.repo_helper.rev_parse("test-chain-d"), old_d_hash
         )
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
     def test_execute_rebase_stack_preserves_colocated_branches(
         self, mock_push
     ):
@@ -116,7 +116,7 @@ class TestCmdRebaseStack(absltest.TestCase):
         )
         self._assert_parent("stk/A", "stk/C")
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
     def test_execute_rebase_stack_fork_detected_aborts(self, mock_push):
         # test-chain-d-e-f has two children:
         # test-chain-d-e-f-g and test-chain-d-e-f-j
@@ -134,7 +134,7 @@ class TestCmdRebaseStack(absltest.TestCase):
             any("Fork detected downstream" in str(p) for p in ui.prints)
         )
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
     def test_execute_rebase_stack_from_fork_leaf_succeeds(self, mock_push):
         # When checked out on the tip of one branch of the fork,
         # it is a strictly linear path from main up to that tip.

@@ -49,7 +49,7 @@ class TestCmdPushStack(absltest.TestCase):
         self.repo = pygit2.Repository(self.repo_helper.path)
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_stack.push_branches")
     def test_execute_push_stack_with_push(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -75,16 +75,13 @@ class TestCmdPushStack(absltest.TestCase):
         self.assertTrue(result)
 
         mock_push_branches.assert_called_once_with(
-            ["feat/1", "feat/2"], [], repo_path=self.repo_helper.path
-        )
-        print("PRINTS WITH PUSH:", ui.prints)
-        assert any(
-            "Found 2 branches to push" in str(getattr(p, "title", str(p)))
-            for p in ui.prints
+            branches=["feat/1", "feat/2"],
+            options=[],
+            repo_path=self.repo_helper.path,
         )
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_stack.push_branches")
     def test_execute_push_stack_fork_aborts(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -144,7 +141,7 @@ class TestCmdPushStack(absltest.TestCase):
             )
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_stack.push_branches")
     def test_execute_push_stack_up_to_date(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -161,4 +158,4 @@ class TestCmdPushStack(absltest.TestCase):
 
         self.assertTrue(result)
         mock_push_branches.assert_not_called()
-        assert any("up-to-date with origin" in str(p) for p in ui.prints)
+        assert any("already up-to-date" in str(p) for p in ui.prints)

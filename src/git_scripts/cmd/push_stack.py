@@ -2,8 +2,9 @@
 
 import pygit2
 
+from git_scripts.cmd.shared import resolve_branches_to_push
 from git_scripts.git.core import GitExecutionError, run_cmd
-from git_scripts.git.rebase import prompt_and_push_branches
+from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import (
     get_parent_branch,
     sort_branches_bottom_to_top,
@@ -144,13 +145,24 @@ def execute_push_stack(
         repo, ordered_stack
     )
 
-    return prompt_and_push_branches(
+    branches_to_push = resolve_branches_to_push(
         branches=branches_to_push,
         ui=ui,
-        push_opts=push_opts,
-        repo_path=repo_path,
-        skipped_count=up_to_date_count,
         prompt_title=(
             f"Push {len(branches_to_push)} branches in stack to origin?"
         ),
+    )
+
+    if not branches_to_push:
+        if up_to_date_count > 0:
+            ui.print(
+                f"✅  {up_to_date_count} branch(es) already up-to-date. "
+                "No branches to push."
+            )
+        return True
+
+    return push_branches(
+        branches=branches_to_push,
+        options=push_opts,
+        repo_path=repo_path,
     )

@@ -4,13 +4,15 @@ import pygit2
 from rich.console import Group
 from rich.panel import Panel
 
+from git_scripts.cmd.shared import resolve_branches_to_push
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
     get_repo,
     get_stack_branches,
 )
-from git_scripts.git.rebase import prompt_and_push_branches, rebase_stack_onto
+from git_scripts.git.rebase import rebase_stack_onto
+from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.worktrees import manage_worktrees
 from git_scripts.ui import UI
@@ -290,16 +292,31 @@ def execute_evolve(
             f"({len(branches_to_push)})[/bold cyan]"
         )
 
-        prompt_and_push_branches(
+        ui.print()
+        ui.print(
+            Panel(
+                "\n".join(
+                    f"  - [yellow]{b}[/yellow]" for b in branches_to_push
+                ),
+                title=panel_title,
+                border_style="cyan",
+                expand=False,
+            )
+        )
+
+        resolved_branches = resolve_branches_to_push(
             branches=branches_to_push,
             ui=ui,
-            push_opts=["--force-with-lease"],
-            repo_path=repo_path,
             prompt_title=(
                 f"Push {len(branches_to_push)} updated branches to origin?"
             ),
-            panel_title=panel_title,
         )
+        if resolved_branches:
+            push_branches(
+                branches=resolved_branches,
+                options=["--force-with-lease"],
+                repo_path=repo_path,
+            )
 
     return ans
 

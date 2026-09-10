@@ -7,6 +7,7 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.progress import Progress
 
+from git_scripts.cmd.shared import resolve_branches_to_push
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
@@ -14,11 +15,10 @@ from git_scripts.git.reads import (
     is_obsolete,
 )
 from git_scripts.git.rebase import (
-    prompt_and_push_branches,
     rebase_stack,
     rebase_stack_onto,
 )
-from git_scripts.git.remote import update_target
+from git_scripts.git.remote import push_branches, update_target
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.worktrees import is_in_another_worktree, manage_worktrees
 from git_scripts.models import BranchRebaseResult, RebaseAction
@@ -188,19 +188,32 @@ def execute_rebase_batch(
             pass
 
     if branches_to_keep:
-        prompt_and_push_branches(
-            branches=list(branches_to_keep),
+        branches_list = list(branches_to_keep)
+        ui.print()
+        ui.print(
+            Panel(
+                "\n".join(f"  - [yellow]{b}[/yellow]" for b in branches_list),
+                title=(
+                    f"[bold cyan]Local branches updated "
+                    f"({len(branches_to_keep)})[/bold cyan]"
+                ),
+                border_style="cyan",
+                expand=False,
+            )
+        )
+        resolved_branches = resolve_branches_to_push(
+            branches=branches_list,
             ui=ui,
-            push_opts=["--force-with-lease"],
-            repo_path=repo_path,
             prompt_title=(
                 f"Push {len(branches_to_keep)} updated branches to origin?"
             ),
-            panel_title=(
-                f"[bold cyan]Local branches updated "
-                f"({len(branches_to_keep)})[/bold cyan]"
-            ),
         )
+        if resolved_branches:
+            push_branches(
+                branches=resolved_branches,
+                options=["--force-with-lease"],
+                repo_path=repo_path,
+            )
 
     return len(failed_log) == 0
 

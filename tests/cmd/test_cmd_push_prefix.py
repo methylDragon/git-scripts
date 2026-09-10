@@ -32,7 +32,7 @@ class TestCmdPushPrefix(absltest.TestCase):
         self.repo.references.create("refs/remotes/origin/feat/2", main_id)
 
     @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
     def test_execute_push_prefix_skips_up_to_date_branches(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -48,12 +48,12 @@ class TestCmdPushPrefix(absltest.TestCase):
         # origin/feat/1 is up to date, so it should be skipped
         # origin/feat/2 is out of date, so it should be pushed
         mock_push_branches.assert_called_once_with(
-            ["feat/2"], [], repo_path=self.repo_helper.path
+            branches=["feat/2"], options=[], repo_path=self.repo_helper.path
         )
         mock_run_cmd.assert_called_once()  # For the git fetch
 
     @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
     def test_execute_push_prefix_does_nothing_if_all_up_to_date(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -67,7 +67,7 @@ class TestCmdPushPrefix(absltest.TestCase):
         mock_push_branches.assert_not_called()
 
     @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
     def test_execute_push_prefix_returns_false_if_push_fails(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -82,7 +82,7 @@ class TestCmdPushPrefix(absltest.TestCase):
         self.assertFalse(result)
 
     @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.git.rebase.push_branches")
+    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
     def test_execute_push_prefix_pushes_new_branch(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -99,5 +99,5 @@ class TestCmdPushPrefix(absltest.TestCase):
 
         self.assertTrue(result)
         mock_push_branches.assert_called_once_with(
-            ["feat/3"], [], repo_path=self.repo_helper.path
+            branches=["feat/3"], options=[], repo_path=self.repo_helper.path
         )

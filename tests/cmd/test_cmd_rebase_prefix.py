@@ -14,7 +14,7 @@ class TestCmdRebasePrefix(absltest.TestCase):
     def tearDown(self):
         self.repo_helper.cleanup()
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
     def test_execute_rebase_prefix_rebases_linear_and_forking_chains(
         self, mock_push
     ):
@@ -72,7 +72,7 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self._assert_parent("test-chain-d-e-f-j", "test-chain-d-e-f-j-k")
         self._assert_parent("test-chain-d-e-f-j-k", "test-chain-d-e-f-j-k-l")
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.prompt_and_push_branches")
+    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
     def test_execute_rebase_prefix_preserves_stack_with_colocated_branches(
         self, mock_push
     ):
