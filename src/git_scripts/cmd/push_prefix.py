@@ -2,11 +2,8 @@
 
 import pygit2
 
-from git_scripts.git.writes import (
-    GitExecutionError,
-    prompt_and_push_branches,
-    run_cmd,
-)
+from git_scripts.git.core import GitExecutionError, run_cmd
+from git_scripts.git.rebase import prompt_and_push_branches
 from git_scripts.ui import UI
 
 

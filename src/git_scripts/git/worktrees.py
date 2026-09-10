@@ -4,7 +4,7 @@ import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from git_scripts.git.writes import GitExecutionError, run_cmd
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.models import WorktreeState
 
 

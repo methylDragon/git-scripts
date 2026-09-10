@@ -1,6 +1,5 @@
 from absl.testing import absltest
 
-# Assuming we rename analysis.py to git/reads.py
 from git_scripts.git.reads import (
     find_cut_point,
     find_sync_point,

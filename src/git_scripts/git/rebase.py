@@ -1,121 +1,19 @@
-"""Git subprocess wrappers for state-mutating operations."""
+"""Git rebase operations."""
 
-import shlex
-import subprocess
 import sys
 
 from rich.panel import Panel
 
+from git_scripts.git.core import GitExecutionError, run_cmd
+from git_scripts.git.remote import push_branches
+from git_scripts.git.worktrees import is_worktree_busy
 from git_scripts.ui import UI
 
 
-class GitExecutionError(Exception):
-    """Custom exception for git subprocess errors."""
-
-    pass
-
-
-def run_cmd(
-    cmd: list[str],
-    cwd: str | None = None,
-    check: bool = True,
-    capture_output: bool = True,
-) -> str:
-    """Executes a subprocess command and returns stripped stdout."""
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            check=check,
-            capture_output=capture_output,
-            text=True,
-        )
-        return result.stdout.strip() if result.stdout else ""
-    except subprocess.CalledProcessError as e:
-        cmd_str = shlex.join(cmd)
-        err_out = e.stderr.strip() if getattr(e, "stderr", None) else str(e)
-        raise GitExecutionError(
-            f"Command failed: {cmd_str}\nError: {err_out}"
-        ) from e
-
-
-def update_target(repo_path: str, target: str, ui) -> bool:
-    """Fetches and rebases the target branch from its remote upstream."""
-    from git_scripts.git.worktrees import is_in_another_worktree
-
-    try:
-        # Check if target exists
-        run_cmd(
-            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
-            cwd=repo_path,
-        )
-    except GitExecutionError:
-        ui.print(
-            f"❌  Error: Target branch '{target}' does not exist locally."
-        )
-        return False
-
-    try:
-        current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
-        if current != target:
-            if is_in_another_worktree(repo_path, target):
-                ui.print(
-                    f"⚠️  Warning: Target branch '{target}' is in another "
-                    "worktree. Fetching its remote tracking branch instead."
-                )
-                try:
-                    run_cmd(
-                        ["git", "fetch", "origin", target],
-                        cwd=repo_path,
-                        check=False,
-                    )
-                except GitExecutionError:
-                    pass
-                return True
-
-            try:
-                run_cmd(["git", "checkout", target], cwd=repo_path)
-            except GitExecutionError:
-                ui.print(f"❌  Error: Could not checkout '{target}'.")
-                return False
-
-        # Check upstream
-        upstream = run_cmd(
-            [
-                "git",
-                "rev-parse",
-                "--abbrev-ref",
-                "--symbolic-full-name",
-                "@{u}",
-            ],
-            cwd=repo_path,
-            check=False,
-        )
-
-        if upstream:
-            ui.print(f"🔄  Pulling updates from {upstream}...")
-            try:
-                run_cmd(["git", "pull", "--rebase"], cwd=repo_path)
-            except GitExecutionError:
-                ui.print("❌  Error: Could not pull updates. Aborting.")
-                return False
-        else:
-            ui.print(
-                f"⚠️  '{target}' is local-only (no upstream). Using "
-                "current state."
-            )
-        return True
-    except Exception as e:
-        ui.print(f"❌  Error updating target: {e}")
-        return False
-
-
 def _handle_rebase_conflict(
-    e: GitExecutionError, repo_path: str, ui, branch: str = ""
+    e: GitExecutionError, repo_path: str, ui: UI | None, branch: str = ""
 ) -> bool:
     """Handles git rebase conflicts by prompting the user for resolution."""
-    from git_scripts.git.worktrees import is_worktree_busy
-
     if not ui:
         try:
             run_cmd(["git", "rebase", "--abort"], cwd=repo_path, check=False)
@@ -172,7 +70,7 @@ def _handle_rebase_conflict(
                     )
                     ui.print("    ✅  Rebase finished. Continuing script...")
                     return True
-                except GitExecutionError as e:
+                except GitExecutionError as e_inner:
                     if not is_worktree_busy(repo_path):
                         ui.print(
                             "    [yellow]⚠️  No active rebase detected.\n"
@@ -201,9 +99,9 @@ def _handle_rebase_conflict(
                                 )
                             except GitExecutionError:
                                 pass
-                            raise e
+                            raise e_inner
 
-                    err_msg = str(e)
+                    err_msg = str(e_inner)
                     if "Error:" in err_msg:
                         err_msg = err_msg.split("Error:", 1)[1].strip()
                     ui.print(
@@ -223,14 +121,34 @@ def _handle_rebase_conflict(
                 raise e
 
 
-def rebase_onto(
-    onto_hash: str,
-    old_base_hash: str,
-    branch: str,
+def rebase_stack_onto(
+    new_parent_commit: str,
+    old_parent_commit: str,
+    tip_branch: str,
     repo_path: str = ".",
-    ui=None,
+    ui: UI | None = None,
 ) -> bool:
-    """Executes git rebase --onto with --update-refs to port a stack."""
+    """Rebases a stack by explicitly replacing its base commit.
+
+    Uses `git rebase --onto <newbase> <oldbase>` along with `--update-refs`
+    and `--rebase-merges` to move the branch and all its downstream
+    dependencies to `new_parent_commit`.
+
+    Use this instead of `rebase_stack` when the target branch has been
+    rewritten (e.g., via a squash merge). A standard rebase would replay
+    the obsolete commits, causing conflicts. This method safely transplants
+    the stack starting exactly after `old_parent_commit`.
+
+    Args:
+        new_parent_commit: The new base commit.
+        old_parent_commit: The old base commit to exclude.
+        tip_branch: The tip branch of the stack being moved.
+        repo_path: Path to the git repository.
+        ui: Optional UI instance for prompting on conflict.
+
+    Returns:
+        True if the rebase was successful, False if aborted due to conflict.
+    """
     try:
         run_cmd(
             [
@@ -239,24 +157,41 @@ def rebase_onto(
                 "--update-refs",
                 "--rebase-merges",
                 "--onto",
-                onto_hash,
-                old_base_hash,
-                branch,
+                new_parent_commit,
+                old_parent_commit,
+                tip_branch,
             ],
             cwd=repo_path,
         )
         return True
     except GitExecutionError as e:
-        return _handle_rebase_conflict(e, repo_path, ui, branch=branch)
+        return _handle_rebase_conflict(e, repo_path, ui, branch=tip_branch)
 
 
-def rebase_standard(
-    target: str,
-    branch: str,
+def rebase_stack(
+    new_base_branch: str,
+    tip_branch: str,
     repo_path: str = ".",
-    ui=None,
+    ui: UI | None = None,
 ) -> bool:
-    """Executes a standard git rebase onto the target branch."""
+    """Rebases a stack up to a target branch using its common ancestor.
+
+    Uses `git rebase --update-refs --rebase-merges` to update the given branch
+    and its downstream stack branches to the latest target commit.
+
+    Use this when catching up a stack to the latest `main` commit, provided
+    the stack's base commits have not been rewritten upstream. If the base
+    commits were squashed or rewritten, use `rebase_stack_onto` instead.
+
+    Args:
+        new_base_branch: The upstream branch to rebase onto (e.g., 'main').
+        tip_branch: The tip branch of the stack being caught up.
+        repo_path: Path to the git repository.
+        ui: Optional UI instance for prompting on conflict.
+
+    Returns:
+        True if the rebase was successful, False if aborted due to conflict.
+    """
     try:
         run_cmd(
             [
@@ -264,30 +199,14 @@ def rebase_standard(
                 "rebase",
                 "--update-refs",
                 "--rebase-merges",
-                target,
-                branch,
+                new_base_branch,
+                tip_branch,
             ],
             cwd=repo_path,
         )
         return True
     except GitExecutionError as e:
-        return _handle_rebase_conflict(e, repo_path, ui, branch=branch)
-
-
-def push_branches(
-    branches: list[str], options: list[str], repo_path: str = "."
-) -> bool:
-    """Pushes multiple branches to origin with optional git flags."""
-    if not branches:
-        return True
-    cmd = ["git", "push", "origin"] + branches + options
-    try:
-        # We don't use run_cmd because we want to pipe to terminal
-        # so auth prompts aren't swallowed
-        subprocess.run(cmd, cwd=repo_path, check=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
+        return _handle_rebase_conflict(e, repo_path, ui, branch=tip_branch)
 
 
 def prompt_and_push_branches(

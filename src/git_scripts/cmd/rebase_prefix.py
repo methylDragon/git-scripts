@@ -7,21 +7,20 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.progress import Progress
 
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
     get_stack_branches,
     is_obsolete,
 )
+from git_scripts.git.rebase import (
+    prompt_and_push_branches,
+    rebase_stack,
+    rebase_stack_onto,
+)
+from git_scripts.git.remote import update_target
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.worktrees import is_in_another_worktree, manage_worktrees
-from git_scripts.git.writes import (
-    GitExecutionError,
-    prompt_and_push_branches,
-    rebase_onto,
-    rebase_standard,
-    run_cmd,
-    update_target,
-)
 from git_scripts.models import BranchRebaseResult, RebaseAction
 from git_scripts.ui import UI
 
@@ -222,11 +221,11 @@ def execute_rebase_prefix(
 
     This function utilizes three distinct rebase strategies:
     - skip: The branch is fully merged into the target.
-    - rebase_onto_sync: The branch depends on another stack branch that
+    - rebase_stack_onto_sync: The branch depends on another stack branch that
       has moved, so we re-link it to the new hash of its dependency.
-    - rebase_onto_cut: The branch's base commit has been squashed into
+    - rebase_stack_onto_cut: The branch's base commit has been squashed into
       the target, so we cut it at the obsolete boundary.
-    - rebase_standard: A standard rebase onto the target tip.
+    - rebase_stack: A standard rebase onto the target tip.
 
     Args:
         repo_path: Path to the repository.
@@ -464,7 +463,7 @@ def _apply_rebase_strategy(res, branch, target, repo_path, ui) -> bool:
             case RebaseAction.REBASE_ONTO_SYNC if (
                 res.sync_new_hash and res.sync_old_hash
             ):
-                return rebase_onto(
+                return rebase_stack_onto(
                     res.sync_new_hash,
                     res.sync_old_hash,
                     branch,
@@ -472,13 +471,11 @@ def _apply_rebase_strategy(res, branch, target, repo_path, ui) -> bool:
                     ui=ui,
                 )
             case RebaseAction.REBASE_ONTO_CUT if res.cut_point:
-                return rebase_onto(
+                return rebase_stack_onto(
                     target, res.cut_point, branch, repo_path=repo_path, ui=ui
                 )
             case RebaseAction.REBASE_STANDARD:
-                return rebase_standard(
-                    target, branch, repo_path=repo_path, ui=ui
-                )
+                return rebase_stack(target, branch, repo_path=repo_path, ui=ui)
             case _:
                 return False
     except GitExecutionError as e:

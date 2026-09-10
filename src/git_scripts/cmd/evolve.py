@@ -4,19 +4,15 @@ import pygit2
 from rich.console import Group
 from rich.panel import Panel
 
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
     get_repo,
     get_stack_branches,
 )
+from git_scripts.git.rebase import prompt_and_push_branches, rebase_stack_onto
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.worktrees import manage_worktrees
-from git_scripts.git.writes import (
-    GitExecutionError,
-    prompt_and_push_branches,
-    rebase_onto,
-    run_cmd,
-)
 from git_scripts.ui import UI
 
 
@@ -388,7 +384,7 @@ def _evolve_stacks(
                         f"    ✨  Detected shared history! "
                         f"Linking onto updated '{sync_branch}'..."
                     )
-                    rebase_ok = rebase_onto(
+                    rebase_ok = rebase_stack_onto(
                         sync_new_hash,
                         sync_old_hash,
                         tip,
@@ -396,7 +392,7 @@ def _evolve_stacks(
                         ui=ui,
                     )
                 else:
-                    rebase_ok = rebase_onto(
+                    rebase_ok = rebase_stack_onto(
                         new_hash, old_hash, tip, repo_path=repo_path, ui=ui
                     )
             except GitExecutionError:

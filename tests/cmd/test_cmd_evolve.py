@@ -115,9 +115,7 @@ class TestCmdEvolve(absltest.TestCase):
 
         self.repo_helper.checkout("test-chain-a")
 
-        from unittest.mock import MagicMock
-
-        mock_ui = MagicMock()
+        mock_ui = mock.MagicMock()
         mock_ui.confirm.return_value = True
         mock_ui.ask_choice.return_value = "Abort rebase and rollback"
 
@@ -136,9 +134,7 @@ class TestCmdEvolve(absltest.TestCase):
     def test_execute_evolve_returns_false_when_user_declines_confirmation(
         self,
     ):
-        from unittest.mock import MagicMock
-
-        mock_ui = MagicMock()
+        mock_ui = mock.MagicMock()
         mock_ui.confirm.return_value = False
 
         result = execute_evolve(
@@ -149,9 +145,7 @@ class TestCmdEvolve(absltest.TestCase):
     def test_execute_evolve_fails_when_default_ui_declines(
         self,
     ):
-        from unittest.mock import patch
-
-        with patch("git_scripts.cmd.evolve.UI") as mock_ui_cls:
+        with mock.patch("git_scripts.cmd.evolve.UI") as mock_ui_cls:
             mock_ui = mock_ui_cls.return_value
             mock_ui.confirm.return_value = False
             result = execute_evolve(
@@ -178,13 +172,11 @@ class TestCmdEvolve(absltest.TestCase):
         self.assertFalse(result)
 
     def test_execute_evolve_returns_false_when_worktree_is_busy(self):
-        from unittest.mock import MagicMock, patch
-
-        mock_ui = MagicMock()
+        mock_ui = mock.MagicMock()
         mock_ui.confirm.return_value = True
 
-        with patch("git_scripts.cmd.evolve.manage_worktrees") as mock_mw:
-            mock_wt_state = MagicMock()
+        with mock.patch("git_scripts.cmd.evolve.manage_worktrees") as mock_mw:
+            mock_wt_state = mock.MagicMock()
             mock_wt_state.failed_branches = {"test-chain-a-b-c"}
             mock_mw.return_value.__enter__.return_value = mock_wt_state
 

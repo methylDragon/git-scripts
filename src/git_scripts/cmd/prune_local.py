@@ -2,7 +2,7 @@
 
 from rich.panel import Panel
 
-from git_scripts.git.writes import GitExecutionError, run_cmd
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.ui import UI
 
 

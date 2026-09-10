@@ -10,8 +10,10 @@ from git_scripts.gh.api import (
     get_open_prs,
     gh_pr_create,
     gh_pr_edit,
+    gh_stack_checkout,
     gh_stack_link,
     gh_stack_unstack,
+    gh_stack_view,
 )
 
 
@@ -98,8 +100,6 @@ def test_gh_stack_link_failure(mock_run):
 
 @patch("subprocess.run")
 def test_gh_stack_view_success(mock_run):
-    from git_scripts.gh.api import gh_stack_view
-
     mock_run.return_value.stdout = '{"some": "data"}'
     res = gh_stack_view(".")
     assert res == {"some": "data"}
@@ -107,8 +107,6 @@ def test_gh_stack_view_success(mock_run):
 
 @patch("subprocess.run")
 def test_gh_stack_view_failure(mock_run):
-    from git_scripts.gh.api import gh_stack_view
-
     mock_run.side_effect = subprocess.CalledProcessError(
         1, "gh", stderr="Error"
     )
@@ -118,16 +116,12 @@ def test_gh_stack_view_failure(mock_run):
 
 @patch("subprocess.run")
 def test_gh_stack_checkout_success(mock_run):
-    from git_scripts.gh.api import gh_stack_checkout
-
     gh_stack_checkout(".", "id")
     mock_run.assert_called_once()
 
 
 @patch("subprocess.run")
 def test_gh_stack_checkout_failure(mock_run):
-    from git_scripts.gh.api import gh_stack_checkout
-
     mock_run.side_effect = subprocess.CalledProcessError(
         1, "gh", stderr="Error"
     )

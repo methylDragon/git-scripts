@@ -7,9 +7,9 @@ from subprocess import run as subprocess_run
 import pygit2
 from rich.panel import Panel
 
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.parallel import analyze_branches_in_parallel
 from git_scripts.git.reads import get_repo, is_obsolete
-from git_scripts.git.writes import GitExecutionError, run_cmd
 from git_scripts.models import RemotePruneResult
 from git_scripts.ui import UI
 
