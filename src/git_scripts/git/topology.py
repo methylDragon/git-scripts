@@ -1,6 +1,7 @@
 """Git branch topology analyzer and graph state manager."""
 
 import subprocess
+from collections.abc import Callable
 
 import pygit2
 
@@ -57,7 +58,11 @@ class TopologyAnalyzer:
             self.repo, branch, self.branches, self.initial_ref_map
         )
 
-    def analyze_obsolescence(self, target: str, ui=None) -> None:
+    def analyze_obsolescence(
+        self,
+        target: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> None:
         """Precomputes obsolescence and cut points for all stack tips.
 
         Evaluates each branch tip against the upstream target branch history
@@ -98,13 +103,14 @@ class TopologyAnalyzer:
                     cut = find_cut_point(local_repo, str(commit_id), target)
             return obs, cut
 
+        if progress_callback:
+            progress_callback("Analyzing topology...")
+
         results = analyze_branches_in_parallel(
             repo_path=self.repo_path,
             branches=self.tips,
             target_ref=target,
             analyze_fn=_analyze,
-            description="Analyzing topology",
-            ui=ui,
         )
 
         for b_name, (obs, cut) in results.items():

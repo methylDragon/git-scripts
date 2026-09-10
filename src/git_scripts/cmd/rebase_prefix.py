@@ -116,7 +116,10 @@ def execute_rebase_batch(
     ui.print(f"  [bold]Found {len(analyzer.tips)} stack tips.[/bold]")
 
     start_time = time.time()
-    analyzer.analyze_obsolescence(target, ui=ui)
+    analyzer.analyze_obsolescence(
+        target,
+        progress_callback=lambda msg: ui.print(f"  [dim]⏳ {msg}[/dim]"),
+    )
     elapsed = time.time() - start_time
     ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
 

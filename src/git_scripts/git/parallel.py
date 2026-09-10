@@ -5,8 +5,6 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypeVar
 
-from rich.progress import Progress
-
 T = TypeVar("T")
 
 
@@ -15,8 +13,8 @@ def analyze_branches_in_parallel(
     branches: Iterable[str],
     target_ref: str,
     analyze_fn: Callable[[str], T],
-    description: str = "Analyzing branches",
-    ui=None,
+    on_start: Callable[[int], None] | None = None,
+    on_progress: Callable[[str, int], None] | None = None,
 ) -> dict[str, T]:
     """Runs a branch analysis function in parallel with proportional progress.
 
@@ -29,8 +27,8 @@ def analyze_branches_in_parallel(
         branches: Iterable of branch names/refs to analyze.
         target_ref: The upstream ref (e.g., 'main' or 'origin/main').
         analyze_fn: Function that takes a branch name and returns a result.
-        description: Text to display on the progress bar.
-        ui: Optional UI object for progress rendering.
+        on_start: Optional callback to receive total commits for progress.
+        on_progress: Optional callback to receive branch and commit count.
 
     Returns:
         A dictionary mapping branch names to their analysis results.
@@ -47,11 +45,11 @@ def analyze_branches_in_parallel(
     counts = {}
     total_commits = 0
 
-    with ThreadPoolExecutor() as executor:
-        futures = {}
+    with ThreadPoolExecutor() as count_executor:
+        count_futures = {}
         for b in branch_list:
-            futures[
-                executor.submit(
+            count_futures[
+                count_executor.submit(
                     subprocess.run,
                     ["git", "rev-list", "--count", f"{target_ref}..{b}"],
                     cwd=repo_cwd,
@@ -60,8 +58,8 @@ def analyze_branches_in_parallel(
                 )
             ] = b
 
-        for f in as_completed(futures):
-            b = futures[f]
+        for f in as_completed(count_futures):
+            b = count_futures[f]
             try:
                 # Assign a minimum weight of 1 for completely merged branches
                 counts[b] = max(1, int(f.result().stdout.strip()))
@@ -69,30 +67,19 @@ def analyze_branches_in_parallel(
                 counts[b] = 1
             total_commits += counts[b]
 
-    results = {}
+    results: dict[str, T] = {}
 
-    if ui and not ui.plain:
-        with Progress(console=ui.console, transient=True) as progress:
-            task = progress.add_task(
-                f"[cyan]{description}...", total=total_commits
-            )
-            with ThreadPoolExecutor() as executor:
-                futures = {
-                    executor.submit(analyze_fn, b): b for b in branch_list
-                }
-                for f in as_completed(futures):
-                    b = futures[f]
-                    # Update description
-                    short_b = b.replace("refs/remotes/origin/", "")
-                    progress.update(
-                        task, description=f"[cyan]{description}: {short_b}"
-                    )
-                    results[b] = f.result()
-                    progress.advance(task, advance=counts[b])
-    else:
-        with ThreadPoolExecutor() as executor:
-            futures = {executor.submit(analyze_fn, b): b for b in branch_list}
-            for f in as_completed(futures):
-                results[futures[f]] = f.result()
+    if on_start:
+        on_start(total_commits)
+
+    with ThreadPoolExecutor() as analyze_executor:
+        analyze_futures = {
+            analyze_executor.submit(analyze_fn, b): b for b in branch_list
+        }
+        for f in as_completed(analyze_futures):
+            b = analyze_futures[f]
+            results[b] = f.result()
+            if on_progress:
+                on_progress(b, counts[b])
 
     return results

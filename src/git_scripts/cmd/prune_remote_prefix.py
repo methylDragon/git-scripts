@@ -7,6 +7,7 @@ from subprocess import run as subprocess_run
 import pygit2
 from rich.panel import Panel
 
+from git_scripts.cmd.shared import BranchProgressTracker
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.parallel import analyze_branches_in_parallel
 from git_scripts.git.reads import get_repo, is_obsolete
@@ -61,14 +62,15 @@ def _find_obsolete_remote_branches(
             f"refs/remotes/origin/{target}",
         )
 
-    results = analyze_branches_in_parallel(
-        repo_path=repo_path,
-        branches=refs_to_check,
-        target_ref=f"refs/remotes/origin/{target}",
-        analyze_fn=_check_obs,
-        description="Analyzing obsolescence",
-        ui=ui,
-    )
+    with BranchProgressTracker(ui, "Analyzing obsolescence") as tracker:
+        results = analyze_branches_in_parallel(
+            repo_path=repo_path,
+            branches=refs_to_check,
+            target_ref=f"refs/remotes/origin/{target}",
+            analyze_fn=_check_obs,
+            on_start=tracker.on_start,
+            on_progress=tracker.on_progress,
+        )
 
     obsolete_branches = []
     unmerged_no_local_branches = []
