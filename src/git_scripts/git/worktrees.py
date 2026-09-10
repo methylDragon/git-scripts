@@ -1,8 +1,9 @@
 """Git worktree management utilities."""
 
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.models import WorktreeState
@@ -39,6 +40,20 @@ def is_worktree_busy(current_wt: str) -> bool:
         return False
 
 
+@dataclass
+class WorktreeLifecycleCallbacks:
+    """Callbacks for worktree state transitions to decouple domain from UI."""
+
+    on_busy: Callable[[str, str], None] = lambda wt, br: None
+    on_detach: Callable[[str, str], None] = lambda wt, br: None
+    on_detach_error: Callable[[str, str, str], None] = lambda wt, br, err: None
+    on_reattach: Callable[[str, str], None] = lambda wt, br: None
+    on_reattach_error: Callable[[str, str, str], None] = lambda wt, br, err: (
+        None
+    )
+    on_debug: Callable[[str], None] = lambda err: None
+
+
 def _process_worktree_branch(
     branch_name: str,
     current_wt: str,
@@ -48,6 +63,7 @@ def _process_worktree_branch(
     repo_path: str,
     detached_map: dict[str, str],
     failed_branches: set[str],
+    callbacks: WorktreeLifecycleCallbacks,
 ) -> None:
     if target_branches is not None and branch_name not in target_branches:
         return
@@ -57,25 +73,17 @@ def _process_worktree_branch(
         return
 
     if is_worktree_busy(current_wt):
-        print(
-            f"⚠️  Warning: Worktree '{current_wt}' is busy. "
-            f"Skipping detach for '{branch_name}'."
-        )
+        callbacks.on_busy(current_wt, branch_name)
         failed_branches.add(branch_name)
         return
 
     try:
         sha = run_cmd(["git", "rev-parse", branch_name], cwd=repo_path)
-        print(
-            f"    🍂  Detaching '{branch_name}' in worktree '{current_wt}'..."
-        )
+        callbacks.on_detach(current_wt, branch_name)
         run_cmd(["git", "checkout", sha, "--detach"], cwd=current_wt)
         detached_map[current_wt] = branch_name
     except GitExecutionError as e:
-        print(
-            f"⚠️  Warning: Failed to detach '{branch_name}' in "
-            f"{current_wt}:\n{e}"
-        )
+        callbacks.on_detach_error(current_wt, branch_name, str(e))
         failed_branches.add(branch_name)
 
 
@@ -83,6 +91,7 @@ def _detach_worktrees(
     prefix: str = "",
     repo_path: str = ".",
     target_branches: list[str] | None = None,
+    callbacks: WorktreeLifecycleCallbacks | None = None,
 ) -> WorktreeState:
     """Detaches HEAD in all inactive worktrees to free branches.
 
@@ -91,6 +100,9 @@ def _detach_worktrees(
     their HEADs (storing their original state in detached_map) so that
     cross-worktree batch operations can succeed without git lock errors.
     """
+    if callbacks is None:
+        callbacks = WorktreeLifecycleCallbacks()
+
     detached_map: dict[str, str] = {}
     failed_branches: set[str] = set()
     try:
@@ -98,7 +110,7 @@ def _detach_worktrees(
             ["git", "worktree", "list", "--porcelain"], cwd=repo_path
         )
     except GitExecutionError as e:
-        print(f"DEBUG Error: {e}")
+        callbacks.on_debug(str(e))
         return WorktreeState(
             detached_map=detached_map, failed_branches=failed_branches
         )
@@ -125,6 +137,7 @@ def _detach_worktrees(
                 repo_path=repo_path,
                 detached_map=detached_map,
                 failed_branches=failed_branches,
+                callbacks=callbacks,
             )
 
     return WorktreeState(
@@ -133,15 +146,20 @@ def _detach_worktrees(
 
 
 def _reattach_worktrees(
-    detached_map: dict[str, str], repo_path: str = "."
+    detached_map: dict[str, str],
+    repo_path: str = ".",
+    callbacks: WorktreeLifecycleCallbacks | None = None,
 ) -> None:
     """Re-checks out branches in their respective worktrees."""
+    if callbacks is None:
+        callbacks = WorktreeLifecycleCallbacks()
+
     for wt, branch in detached_map.items():
         try:
-            print(f"    🌱  Reattaching '{branch}' in worktree '{wt}'...")
+            callbacks.on_reattach(wt, branch)
             run_cmd(["git", "checkout", branch], cwd=wt)
         except GitExecutionError as e:
-            print(f"⚠️  Warning: Could not reattach '{branch}' in '{wt}'.\n{e}")
+            callbacks.on_reattach_error(wt, branch, str(e))
 
 
 @contextmanager
@@ -150,6 +168,7 @@ def manage_worktrees(
     active: bool = True,
     repo_path: str = ".",
     target_branches: list[str] | None = None,
+    callbacks: WorktreeLifecycleCallbacks | None = None,
 ) -> Generator[WorktreeState, None, None]:
     """Temporarily detaches branches in other worktrees during execution.
 
@@ -157,9 +176,11 @@ def manage_worktrees(
     """
     state = WorktreeState(detached_map={}, failed_branches=set())
     if active:
-        state = _detach_worktrees(prefix, repo_path, target_branches)
+        state = _detach_worktrees(
+            prefix, repo_path, target_branches, callbacks
+        )
     try:
         yield state
     finally:
         if active:
-            _reattach_worktrees(state.detached_map, repo_path)
+            _reattach_worktrees(state.detached_map, repo_path, callbacks)

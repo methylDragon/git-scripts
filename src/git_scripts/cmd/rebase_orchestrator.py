@@ -5,6 +5,7 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.progress import Progress
 
+from git_scripts.cmd.shared import get_ui_worktree_callbacks
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
@@ -269,6 +270,7 @@ def rebase_loop(
         active=all_worktrees,
         repo_path=repo_path,
         target_branches=list(branch_pool),
+        callbacks=get_ui_worktree_callbacks(ui),
     ) as wt_state:
         failed_branches = wt_state.failed_branches
         with Progress(console=ui.console, transient=True) as progress:

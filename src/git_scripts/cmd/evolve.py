@@ -8,7 +8,10 @@ from git_scripts.cmd.rebase_orchestrator import (
     ScriptAbortError,
     handle_interactive_conflict,
 )
-from git_scripts.cmd.shared import resolve_branches_to_push
+from git_scripts.cmd.shared import (
+    get_ui_worktree_callbacks,
+    resolve_branches_to_push,
+)
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
@@ -310,6 +313,7 @@ def evolve_loop(
         active=True,
         repo_path=repo_path,
         target_branches=list(implicated_branches),
+        callbacks=get_ui_worktree_callbacks(ui),
     ) as wt_state:
         failed_branches = wt_state.failed_branches
         for tip in analyzer.tips:

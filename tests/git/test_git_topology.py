@@ -41,6 +41,16 @@ class TestTopologyAnalyzer(absltest.TestCase):
         self.assertEqual(len(analyzer.initial_ref_map), 3)
         self.assertEqual(analyzer.tips, ["C"])
 
+    def test_analyze_obsolescence_calls_callback(self):
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("A", create=True)
+        self.repo_helper.commit("A", "a.txt", "a")
+
+        mock_progress = MagicMock()
+        analyzer = TopologyAnalyzer(self.repo_helper.path, ["A"])
+        analyzer.analyze_obsolescence("main", progress_callback=mock_progress)
+        self.assertGreaterEqual(mock_progress.call_count, 1)
+
     def test_analyzer_get_sync_point(self):
         """Tests that the analyzer finds sync points correctly."""
         self.repo_helper.checkout("main")

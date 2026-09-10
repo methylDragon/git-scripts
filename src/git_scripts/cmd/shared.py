@@ -4,8 +4,31 @@ from rich.progress import Progress
 
 from git_scripts.git.core import GitExecutionError
 from git_scripts.git.remote import update_target
+from git_scripts.git.worktrees import WorktreeLifecycleCallbacks
 from git_scripts.models import UpdateTargetResult
 from git_scripts.ui import UI
+
+
+def get_ui_worktree_callbacks(ui: UI) -> WorktreeLifecycleCallbacks:
+    """Provides a set of UI-bound callbacks for worktree operations."""
+    return WorktreeLifecycleCallbacks(
+        on_busy=lambda wt, br: ui.print(
+            f"⚠️  Warning: Worktree '{wt}' is busy. Skipping detach for '{br}'."
+        ),
+        on_detach=lambda wt, br: ui.print(
+            f"    🍂  Detaching '{br}' in worktree '{wt}'..."
+        ),
+        on_detach_error=lambda wt, br, err: ui.print(
+            f"⚠️  Warning: Failed to detach '{br}' in {wt}:\n{err}"
+        ),
+        on_reattach=lambda wt, br: ui.print(
+            f"    🌱  Reattaching '{br}' in worktree '{wt}'..."
+        ),
+        on_reattach_error=lambda wt, br, err: ui.print(
+            f"⚠️  Warning: Could not reattach '{br}' in '{wt}'.\n{err}"
+        ),
+        on_debug=lambda err: ui.print(f"DEBUG Error: {err}"),
+    )
 
 
 def ui_update_target(repo_path: str, target: str, ui: UI) -> bool:

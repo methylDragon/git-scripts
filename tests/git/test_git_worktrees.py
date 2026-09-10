@@ -1,9 +1,13 @@
 import os
+from unittest.mock import MagicMock
 
 from absl.testing import absltest
 
 from git_scripts.git.core import run_cmd
-from git_scripts.git.worktrees import manage_worktrees
+from git_scripts.git.worktrees import (
+    WorktreeLifecycleCallbacks,
+    manage_worktrees,
+)
 from tests.helpers import GitTestRepo
 
 
@@ -20,9 +24,20 @@ class TestGitWorktrees(absltest.TestCase):
         worktree_path = os.path.join(self.repo_helper.temp_dir.name, "wt_a")
         self.repo_helper.create_worktree(worktree_path, "test-chain-a")
 
+        mock_on_detach = MagicMock()
+        mock_on_reattach = MagicMock()
+
+        mock_callbacks = WorktreeLifecycleCallbacks(
+            on_detach=mock_on_detach,
+            on_reattach=mock_on_reattach,
+        )
+
         # Test Context Manager
         with manage_worktrees(
-            "test-chain-", active=True, repo_path=self.repo_helper.path
+            "test-chain-",
+            active=True,
+            repo_path=self.repo_helper.path,
+            callbacks=mock_callbacks,
         ) as wt_state:
             self.assertIn(worktree_path, wt_state.detached_map)
             self.assertEqual(
@@ -33,10 +48,14 @@ class TestGitWorktrees(absltest.TestCase):
                 ["git", "branch", "--show-current"], cwd=worktree_path
             )
             self.assertEqual(out, "")  # detached HEAD
+            mock_on_detach.assert_called_once_with(
+                worktree_path, "test-chain-a"
+            )
 
         # Ensure branch is reattached
         out = run_cmd(["git", "branch", "--show-current"], cwd=worktree_path)
         self.assertEqual(out, "test-chain-a")
+        mock_on_reattach.assert_called_once_with(worktree_path, "test-chain-a")
 
     def test_manage_worktrees_with_target_branches_only_detaches_targets(self):
         # Create two worktrees
