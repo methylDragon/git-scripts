@@ -1,9 +1,20 @@
 """Core logic for the git-rebase-stack command."""
 
-import pygit2
+import time
 
-from git_scripts.cmd.rebase_prefix import execute_rebase_batch
+import pygit2
+from rich.panel import Panel
+
+from git_scripts.cmd.rebase_orchestrator import (
+    print_batch_summary,
+    prompt_and_delete_merged,
+    rebase_loop,
+)
+from git_scripts.cmd.shared import resolve_branches_to_push, ui_update_target
+from git_scripts.git.core import GitExecutionError, run_cmd
+from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import (
+    TopologyAnalyzer,
     get_parent_branch,
     sort_branches_bottom_to_top,
 )
@@ -132,23 +143,7 @@ def execute_rebase_stack(
     auto_delete: bool = False,
     ui: UI | None = None,
 ) -> bool:
-    """Executes the rebase-stack command to rebase the current linear stack.
-
-    Determines the linear branch stack containing HEAD (ancestors up to
-    `target`, and descendants down to the tip) and batch-rebases them
-    onto the `target` branch.
-
-    Args:
-        repo_path: Path to the git repository.
-        target: The target upstream branch (defaults to 'main').
-        all_worktrees: If True, detaches branches checked out in other
-            worktrees before rebasing to avoid git lock errors.
-        auto_delete: If True, fully merged branches are deleted.
-        ui: Optional UI instance for output and confirmation prompts.
-
-    Returns:
-        True if all stack branches were processed without conflicts.
-    """
+    """Executes the rebase-stack command to rebase the current linear stack."""
     if ui is None:
         ui = UI()
 
@@ -191,12 +186,78 @@ def execute_rebase_stack(
     ordered_stack = sort_branches_bottom_to_top(stack, parent_map)
     ordered_stack = [b for b in ordered_stack if b != target]
 
-    return execute_rebase_batch(
-        repo_path=repo_path,
-        branches=ordered_stack,
-        target=target,
-        all_worktrees=all_worktrees,
-        auto_delete=auto_delete,
-        ui=ui,
-        prefix="",
+    if not ui_update_target(repo_path, target, ui):
+        try:
+            run_cmd(["git", "checkout", current_branch], cwd=repo_path)
+        except GitExecutionError:
+            pass
+        return False
+
+    analyzer = TopologyAnalyzer(repo_path, ordered_stack)
+    ui.print(f"  [bold]Found {len(analyzer.tips)} stack tips.[/bold]")
+
+    start_time = time.time()
+    analyzer.analyze_obsolescence(
+        target,
+        progress_callback=lambda msg: ui.print(f"  [dim]⏳ {msg}[/dim]"),
     )
+    elapsed = time.time() - start_time
+    ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
+
+    if all_worktrees:
+        ui.print(
+            "[dim]🔄  Detaching worktrees for cross-worktree rebase...[/dim]"
+        )
+
+    branch_pool = set(ordered_stack)
+    batch_result, completed = rebase_loop(
+        analyzer,
+        repo_path,
+        "",
+        target,
+        all_worktrees,
+        ui,
+        branch_pool,
+    )
+    if not completed:
+        return False
+
+    print_batch_summary(ui, batch_result)
+
+    prompt_and_delete_merged(batch_result, auto_delete, ui, repo_path)
+
+    try:
+        run_cmd(["git", "checkout", current_branch], cwd=repo_path)
+    except GitExecutionError:
+        pass
+
+    if batch_result.branches_to_keep:
+        branches_list = list(batch_result.branches_to_keep)
+        ui.print()
+        ui.print(
+            Panel(
+                "\n".join(f"  - [yellow]{b}[/yellow]" for b in branches_list),
+                title=(
+                    f"[bold cyan]Local branches updated "
+                    f"({len(batch_result.branches_to_keep)})[/bold cyan]"
+                ),
+                border_style="cyan",
+                expand=False,
+            )
+        )
+        resolved_branches = resolve_branches_to_push(
+            branches=branches_list,
+            ui=ui,
+            prompt_title=(
+                f"Push {len(batch_result.branches_to_keep)} updated "
+                "branches to origin?"
+            ),
+        )
+        if resolved_branches:
+            push_branches(
+                branches=resolved_branches,
+                options=["--force-with-lease"],
+                repo_path=repo_path,
+            )
+
+    return len(batch_result.failed_log) == 0

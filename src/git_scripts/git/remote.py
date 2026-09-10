@@ -2,75 +2,70 @@
 
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.worktrees import is_in_another_worktree
+from git_scripts.models import UpdateTargetResult
 
 
-def update_target(repo_path: str, target: str, ui) -> bool:
-    """Fetches and rebases the target branch from its remote upstream."""
+def update_target(repo_path: str, target: str) -> UpdateTargetResult:
+    """Fetches and rebases the target branch from its remote upstream.
+
+    Returns:
+        UpdateTargetResult indicating the result state.
+
+    Raises:
+        GitExecutionError: if target does not exist or fails to pull.
+    """
     try:
         # Check if target exists
         run_cmd(
             ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}"],
             cwd=repo_path,
         )
-    except GitExecutionError:
-        ui.print(
-            f"❌  Error: Target branch '{target}' does not exist locally."
-        )
-        return False
+    except GitExecutionError as err:
+        raise GitExecutionError(
+            f"Target branch '{target}' does not exist locally."
+        ) from err
 
-    try:
-        current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
-        if current != target:
-            if is_in_another_worktree(repo_path, target):
-                ui.print(
-                    f"⚠️  Warning: Target branch '{target}' is in another "
-                    "worktree. Fetching its remote tracking branch instead."
+    current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
+    if current != target:
+        if is_in_another_worktree(repo_path, target):
+            try:
+                run_cmd(
+                    ["git", "fetch", "origin", target],
+                    cwd=repo_path,
+                    check=False,
                 )
-                try:
-                    run_cmd(
-                        ["git", "fetch", "origin", target],
-                        cwd=repo_path,
-                        check=False,
-                    )
-                except GitExecutionError:
-                    pass
-                return True
-
-            try:
-                run_cmd(["git", "checkout", target], cwd=repo_path)
             except GitExecutionError:
-                ui.print(f"❌  Error: Could not checkout '{target}'.")
-                return False
+                pass
+            return UpdateTargetResult.FETCHED_ONLY
 
-        # Check upstream
-        upstream = run_cmd(
-            [
-                "git",
-                "rev-parse",
-                "--abbrev-ref",
-                "--symbolic-full-name",
-                "@{u}",
-            ],
-            cwd=repo_path,
-            check=False,
-        )
+        try:
+            run_cmd(["git", "checkout", target], cwd=repo_path)
+        except GitExecutionError as err:
+            raise GitExecutionError(f"Could not checkout '{target}'.") from err
 
-        if upstream:
-            ui.print(f"🔄  Pulling updates from {upstream}...")
-            try:
-                run_cmd(["git", "pull", "--rebase"], cwd=repo_path)
-            except GitExecutionError:
-                ui.print("❌  Error: Could not pull updates. Aborting.")
-                return False
-        else:
-            ui.print(
-                f"⚠️  '{target}' is local-only (no upstream). Using "
-                "current state."
-            )
-        return True
-    except Exception as e:
-        ui.print(f"❌  Error updating target: {e}")
-        return False
+    # Check upstream
+    upstream = run_cmd(
+        [
+            "git",
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{u}",
+        ],
+        cwd=repo_path,
+        check=False,
+    )
+
+    if upstream:
+        try:
+            run_cmd(["git", "pull", "--rebase"], cwd=repo_path)
+        except GitExecutionError as e:
+            raise GitExecutionError(
+                f"Could not pull updates. Aborting.\n{e}"
+            ) from e
+        return UpdateTargetResult.SUCCESS
+    else:
+        return UpdateTargetResult.LOCAL_ONLY
 
 
 def push_branches(

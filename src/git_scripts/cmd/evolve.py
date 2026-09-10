@@ -4,6 +4,10 @@ import pygit2
 from rich.console import Group
 from rich.panel import Panel
 
+from git_scripts.cmd.rebase_orchestrator import (
+    ScriptAbortError,
+    handle_interactive_conflict,
+)
 from git_scripts.cmd.shared import resolve_branches_to_push
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
@@ -11,10 +15,11 @@ from git_scripts.git.reads import (
     get_repo,
     get_stack_branches,
 )
-from git_scripts.git.rebase import rebase_stack_onto
+from git_scripts.git.rebase_plan import execute_rebase_plan
 from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.git.worktrees import manage_worktrees
+from git_scripts.models import BranchRebasePlan, RebaseAction, RebaseStatus
 from git_scripts.ui import UI
 
 
@@ -163,9 +168,10 @@ def _get_current_branch_name(repo: pygit2.Repository) -> str:
     return ""
 
 
-def _resolve_old_hash(
+def resolve_and_report_old_hash(
     repo: pygit2.Repository, repo_path: str, old_hash: str | None, ui: UI
 ) -> str | None:
+    """Resolves the old hash and reports to the UI if not provided."""
     if not old_hash:
         resolved = find_old_base(repo_path)
         if not resolved:
@@ -191,30 +197,150 @@ def _restore_current_branch(repo_path: str, current_branch_name: str) -> None:
             pass
 
 
+def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
+    """Finds branches whose merge-base matches the old hash but not the new."""
+    orphans = []
+    try:
+        old_commit = repo.revparse_single(old_hash)
+    except (KeyError, ValueError):
+        old_commit = None
+
+    if old_commit:
+        for branch_name in repo.branches.local:
+            if branch_name == current_branch_name:
+                continue
+
+            try:
+                branch_commit = repo.branches[branch_name].target
+                if (
+                    repo.merge_base(branch_commit, old_commit.id)
+                    != old_commit.id
+                ):
+                    continue
+
+                if repo.merge_base(new_hash, branch_commit) == pygit2.Oid(
+                    hex=new_hash
+                ):
+                    continue
+
+                orphans.append(branch_name)
+            except (KeyError, ValueError, pygit2.GitError):
+                pass
+
+    return orphans
+
+
+def process_single_evolve_stack(
+    tip: str,
+    repo_path: str,
+    repo: pygit2.Repository,
+    orphans: list[str],
+    analyzer: TopologyAnalyzer,
+    new_hash: str,
+    resolved_old_hash: str,
+    ui: UI,
+    failed_branches: set[str],
+) -> tuple[bool, list[str]]:
+    """Evolves a single stack, returning success status and evolved refs."""
+    ui.print(f"🔗  Reconnecting stack '{tip}'...")
+    stack_refs = get_stack_branches(repo, tip)
+
+    if any(b in failed_branches for b in stack_refs) or tip in failed_branches:
+        ui.print("    [red]⚠️  Skipping due to busy or dirty worktree.[/red]")
+        return False, []
+
+    sync_point = analyzer.get_sync_point(tip)
+
+    if sync_point:
+        sync_branch, sync_old_hash, sync_new_hash = sync_point
+        ui.print(
+            f"    ✨  Detected shared history! "
+            f"Linking onto updated '{sync_branch}'..."
+        )
+        plan = BranchRebasePlan(
+            branch=tip,
+            action=RebaseAction.REBASE_ONTO_SYNC,
+            sync_branch=sync_branch,
+            sync_old_hash=sync_old_hash,
+            sync_new_hash=sync_new_hash,
+        )
+    else:
+        plan = BranchRebasePlan(
+            branch=tip,
+            action=RebaseAction.REBASE_ONTO_CUT,
+            cut_point=resolved_old_hash,
+        )
+
+    status = execute_rebase_plan(plan, repo_path, new_hash)
+
+    if status == RebaseStatus.CONFLICT:
+        status = handle_interactive_conflict(repo_path, ui, tip)
+
+    successfully_evolved = []
+    if status == RebaseStatus.SUCCESS:
+        ui.print("    ✅  Success.")
+        for ref in stack_refs:
+            if ref in orphans:
+                successfully_evolved.append(ref)
+        return True, successfully_evolved
+    else:
+        ui.print("    💥 Conflict or error. Aborting...")
+        return False, []
+
+
+def evolve_loop(
+    repo_path: str,
+    repo: pygit2.Repository,
+    orphans: list[str],
+    analyzer: TopologyAnalyzer,
+    new_hash: str,
+    resolved_old_hash: str,
+    ui: UI,
+) -> tuple[int, list[str], list[str]]:
+    """Loops over all tips to evolve them."""
+    success_count = 0
+    failed_log = []
+    successfully_evolved_branches = []
+
+    implicated_branches = set()
+    for tip in analyzer.tips:
+        implicated_branches.update(get_stack_branches(repo, tip))
+
+    with manage_worktrees(
+        active=True,
+        repo_path=repo_path,
+        target_branches=list(implicated_branches),
+    ) as wt_state:
+        failed_branches = wt_state.failed_branches
+        for tip in analyzer.tips:
+            success, evolved_refs = process_single_evolve_stack(
+                tip,
+                repo_path,
+                repo,
+                orphans,
+                analyzer,
+                new_hash,
+                resolved_old_hash,
+                ui,
+                failed_branches,
+            )
+            if success:
+                success_count += 1
+                successfully_evolved_branches.extend(evolved_refs)
+            else:
+                failed_log.append(
+                    format_stack_tree(repo, tip, allowed_refs=set(orphans))
+                )
+
+    return success_count, failed_log, successfully_evolved_branches
+
+
 def execute_evolve(
     repo_path: str,
     old_hash: str | None = None,
     ui: UI | None = None,
 ) -> bool:
-    """Rebases displaced stack branches onto the updated base commit.
-
-    When an upstream branch is rebased, child branches (stacks) become
-    "orphaned" because their base commit is no longer part of the target
-    branch's history. This function detects all branches that still point
-    to the `old_hash`, calculates where their new base should be relative
-    to the updated `HEAD`, and performs `git rebase --update-refs` to
-    restore the stack architecture.
-
-    Args:
-        repo_path: Path to the git repository.
-        old_hash: The previous HEAD hash before the rebase occurred.
-            the reflog (HEAD@{1}) will be queried automatically.
-        ui: Optional UI instance for output and confirmation prompts.
-
-    Returns:
-        True if affected branches rebased or no orphans found.
-        False if any rebase operation conflicts or fails.
-    """
+    """Rebases displaced stack branches onto the updated base commit."""
     if ui is None:
         ui = UI()
 
@@ -223,7 +349,9 @@ def execute_evolve(
 
     current_branch_name = _get_current_branch_name(repo)
 
-    resolved_old_hash = _resolve_old_hash(repo, repo_path, old_hash, ui)
+    resolved_old_hash = resolve_and_report_old_hash(
+        repo, repo_path, old_hash, ui
+    )
     if not resolved_old_hash:
         return False
 
@@ -254,7 +382,6 @@ def execute_evolve(
     )
     for tip in analyzer.tips:
         tree_view = format_stack_tree(repo, tip, allowed_refs=set(orphans))
-        # Indent it
         indented = "\n".join(
             "        " + line if i > 0 else "    - " + line
             for i, line in enumerate(tree_view.splitlines())
@@ -266,14 +393,19 @@ def execute_evolve(
         ui.print("❌  Aborting.")
         return False
 
-    success_count, failed_log, successfully_evolved_branches = _evolve_stacks(
-        repo_path,
-        orphans,
-        analyzer,
-        new_hash,
-        resolved_old_hash,
-        ui,
-    )
+    try:
+        success_count, failed_log, successfully_evolved_branches = evolve_loop(
+            repo_path,
+            repo,
+            orphans,
+            analyzer,
+            new_hash,
+            resolved_old_hash,
+            ui,
+        )
+    except ScriptAbortError:
+        _restore_current_branch(repo_path, current_branch_name)
+        return False
 
     _restore_current_branch(repo_path, current_branch_name)
 
@@ -282,7 +414,6 @@ def execute_evolve(
     if successfully_evolved_branches:
         branches_to_push = list(successfully_evolved_branches)
 
-        # Add current branch
         if current_branch_name:
             if current_branch_name not in branches_to_push:
                 branches_to_push.insert(0, current_branch_name)
@@ -319,112 +450,3 @@ def execute_evolve(
             )
 
     return ans
-
-
-def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
-    """Finds branches whose merge-base matches the old hash but not the new."""
-    orphans = []
-    try:
-        old_commit = repo.revparse_single(old_hash)
-    except (KeyError, ValueError):
-        old_commit = None
-
-    if old_commit:
-        for branch_name in repo.branches.local:
-            if branch_name == current_branch_name:
-                continue
-
-            try:
-                branch_commit = repo.branches[branch_name].target
-                # Check if old_hash is an ancestor of branch
-                if (
-                    repo.merge_base(branch_commit, old_commit.id)
-                    != old_commit.id
-                ):
-                    continue
-
-                # If new_hash is an ancestor of branch, it's already updated
-                if repo.merge_base(new_hash, branch_commit) == pygit2.Oid(
-                    hex=new_hash
-                ):
-                    continue
-
-                orphans.append(branch_name)
-            except (KeyError, ValueError, pygit2.GitError):
-                pass
-
-    return orphans
-
-
-def _evolve_stacks(
-    repo_path, orphans, analyzer: TopologyAnalyzer, new_hash, old_hash, ui
-) -> tuple[int, list[str], list[str]]:
-    success_count = 0
-    failed_log = []
-    successfully_evolved_branches = []
-
-    repo = get_repo(repo_path)
-    implicated_branches = set()
-    for tip in analyzer.tips:
-        implicated_branches.update(get_stack_branches(repo, tip))
-
-    with manage_worktrees(
-        active=True,
-        repo_path=repo_path,
-        target_branches=list(implicated_branches),
-    ) as wt_state:
-        failed_branches = wt_state.failed_branches
-        for tip in analyzer.tips:
-            ui.print(f"🔗  Reconnecting stack '{tip}'...")
-            stack_refs = get_stack_branches(repo, tip)
-
-            # Check if any branch in this stack failed to detach
-            if (
-                any(b in failed_branches for b in stack_refs)
-                or tip in failed_branches
-            ):
-                ui.print(
-                    "    [red]⚠️  Skipping due to busy or dirty worktree.[/red]"
-                )
-                failed_log.append(
-                    format_stack_tree(repo, tip, allowed_refs=set(orphans))
-                )
-                continue
-
-            sync_point = analyzer.get_sync_point(tip)
-
-            try:
-                rebase_ok = False
-                if sync_point:
-                    sync_branch, sync_old_hash, sync_new_hash = sync_point
-                    ui.print(
-                        f"    ✨  Detected shared history! "
-                        f"Linking onto updated '{sync_branch}'..."
-                    )
-                    rebase_ok = rebase_stack_onto(
-                        sync_new_hash,
-                        sync_old_hash,
-                        tip,
-                        repo_path=repo_path,
-                        ui=ui,
-                    )
-                else:
-                    rebase_ok = rebase_stack_onto(
-                        new_hash, old_hash, tip, repo_path=repo_path, ui=ui
-                    )
-            except GitExecutionError:
-                rebase_ok = False
-
-            if rebase_ok:
-                ui.print("    ✅  Success.")
-                success_count += 1
-                for ref in stack_refs:
-                    if ref in orphans:
-                        successfully_evolved_branches.append(ref)
-            else:
-                ui.print("    💥 Conflict. Aborting...")
-                failed_log.append(
-                    format_stack_tree(repo, tip, allowed_refs=set(orphans))
-                )
-
-    return success_count, failed_log, successfully_evolved_branches

@@ -1,0 +1,111 @@
+from unittest.mock import MagicMock, patch
+
+from absl.testing import absltest
+
+from git_scripts.cmd.rebase_orchestrator import handle_interactive_conflict
+from git_scripts.models import RebaseStatus, ScriptAbortError
+
+
+class TestCmdRebaseOrchestrator(absltest.TestCase):
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    def test_handle_interactive_conflict_abort_script(
+        self, mock_rebase_continue
+    ):
+        mock_ui = MagicMock()
+        mock_ui.ask_choice.return_value = "Abort script without rollback"
+
+        with self.assertRaises(ScriptAbortError):
+            handle_interactive_conflict(".", mock_ui, "my-branch")
+
+        mock_rebase_continue.assert_not_called()
+        mock_ui.print.assert_any_call(
+            "    [red]❌  Conflict detected on branch "
+            "'[bold]my-branch[/bold]'.[/red]"
+        )
+
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
+    def test_handle_interactive_conflict_abort_rebase(self, mock_rebase_abort):
+        mock_ui = MagicMock()
+        mock_ui.ask_choice.return_value = "Abort rebase and rollback"
+
+        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+
+        self.assertEqual(status, RebaseStatus.ERROR)
+        mock_rebase_abort.assert_called_once_with(".")
+
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    def test_handle_interactive_conflict_resolve_success(
+        self, mock_rebase_continue
+    ):
+        mock_ui = MagicMock()
+        mock_ui.ask_choice.return_value = "Resolve manually, then continue"
+        mock_rebase_continue.return_value = RebaseStatus.SUCCESS
+
+        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+
+        self.assertEqual(status, RebaseStatus.SUCCESS)
+        mock_rebase_continue.assert_called_once_with(".")
+
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    def test_handle_interactive_conflict_resolve_accidentally_continued(
+        self, mock_rebase_continue, mock_is_worktree_busy, mock_rebase_abort
+    ):
+        mock_ui = MagicMock()
+        # Initial choice: resolve manually
+        # Second choice inside the false worktree check: "Yes"
+        mock_ui.ask_choice.side_effect = [
+            "Resolve manually, then continue",
+            "Yes",
+        ]
+        mock_rebase_continue.return_value = RebaseStatus.CONFLICT
+        mock_is_worktree_busy.return_value = False
+
+        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+
+        self.assertEqual(status, RebaseStatus.SUCCESS)
+        mock_is_worktree_busy.assert_called_once_with(".")
+        mock_rebase_abort.assert_not_called()
+
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    def test_handle_interactive_conflict_resolve_accidentally_aborted(
+        self, mock_rebase_continue, mock_is_worktree_busy, mock_rebase_abort
+    ):
+        mock_ui = MagicMock()
+        mock_ui.ask_choice.side_effect = [
+            "Resolve manually, then continue",
+            "No (Treat as aborted)",
+        ]
+        mock_rebase_continue.return_value = RebaseStatus.CONFLICT
+        mock_is_worktree_busy.return_value = False
+
+        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+
+        self.assertEqual(status, RebaseStatus.ERROR)
+        mock_rebase_abort.assert_called_once_with(".")
+
+    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    def test_handle_interactive_conflict_loops_on_unresolved(
+        self, mock_rebase_continue, mock_is_worktree_busy
+    ):
+        mock_ui = MagicMock()
+        # Loops once because still busy, then succeeds
+        mock_ui.ask_choice.return_value = "Resolve manually, then continue"
+        mock_rebase_continue.side_effect = [
+            RebaseStatus.CONFLICT,
+            RebaseStatus.SUCCESS,
+        ]
+        mock_is_worktree_busy.return_value = True
+
+        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+
+        self.assertEqual(status, RebaseStatus.SUCCESS)
+        self.assertEqual(mock_rebase_continue.call_count, 2)
+
+
+if __name__ == "__main__":
+    absltest.main()

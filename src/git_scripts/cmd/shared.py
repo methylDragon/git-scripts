@@ -2,7 +2,30 @@
 
 from rich.progress import Progress
 
+from git_scripts.git.core import GitExecutionError
+from git_scripts.git.remote import update_target
+from git_scripts.models import UpdateTargetResult
 from git_scripts.ui import UI
+
+
+def ui_update_target(repo_path: str, target: str, ui: UI) -> bool:
+    """Updates target branch and logs appropriate UI messages."""
+    try:
+        status = update_target(repo_path, target)
+        if status == UpdateTargetResult.FETCHED_ONLY:
+            ui.print(
+                f"⚠️  Warning: Target branch '{target}' is in another "
+                "worktree. Fetching its remote tracking branch instead."
+            )
+        elif status == UpdateTargetResult.LOCAL_ONLY:
+            ui.print(
+                f"⚠️  '{target}' is local-only (no upstream). Using "
+                "current state."
+            )
+        return True
+    except GitExecutionError as e:
+        ui.print(f"❌  {e}")
+        return False
 
 
 class BranchProgressTracker:

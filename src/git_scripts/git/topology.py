@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import pygit2
 
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.parallel import analyze_branches_in_parallel
 from git_scripts.git.reads import (
     find_cut_point,
@@ -307,3 +308,31 @@ def sort_branches_bottom_to_top(
         queue.extend(branch_to_children.get(curr, []))
 
     return ordered
+
+
+def sync_colocated_branches(
+    repo: pygit2.Repository,
+    branch: str,
+    stack_refs: set[str],
+    analyzer: TopologyAnalyzer,
+    repo_path: str,
+) -> None:
+    """Fast-forward co-located alias branches sharing the exact same commit."""
+    new_tip_commit = repo.revparse_single(branch)
+    analyzer_old_commit_hash = analyzer.initial_ref_map.get(branch)
+    new_id_str = str(new_tip_commit.id)
+
+    if not analyzer_old_commit_hash or new_id_str == analyzer_old_commit_hash:
+        return
+
+    for ref in stack_refs:
+        if ref == branch:
+            continue
+        ref_old_hash = analyzer.initial_ref_map.get(ref)
+        if ref_old_hash == analyzer_old_commit_hash:
+            try:
+                run_cmd(
+                    ["git", "branch", "-f", ref, new_id_str], cwd=repo_path
+                )
+            except GitExecutionError:
+                pass

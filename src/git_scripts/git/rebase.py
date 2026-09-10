@@ -1,150 +1,77 @@
 """Git rebase operations."""
 
-import sys
-
 from git_scripts.git.core import GitExecutionError, run_cmd
-from git_scripts.git.worktrees import is_worktree_busy
-from git_scripts.ui import UI
+from git_scripts.models import RebaseStatus
 
 
-def _handle_rebase_conflict(
-    e: GitExecutionError, repo_path: str, ui: UI | None, branch: str = ""
-) -> bool:
-    """Handles git rebase conflicts by prompting the user for resolution."""
-    if not ui:
-        try:
-            run_cmd(["git", "rebase", "--abort"], cwd=repo_path, check=False)
-        except GitExecutionError:
-            pass
-        raise e
+def _parse_rebase_error(e: GitExecutionError) -> RebaseStatus:
+    """Parses a GitExecutionError to determine if it's a conflict or fatal."""
+    err_msg = str(e).lower()
+    if (
+        "conflict" in err_msg
+        or "could not apply" in err_msg
+        or "patch failed" in err_msg
+    ):
+        return RebaseStatus.CONFLICT
+    return RebaseStatus.ERROR
 
-    err_msg = str(e)
-    if "Error:" in err_msg:
-        err_msg = err_msg.split("Error:", 1)[1].strip()
 
-    branch_msg = f" on branch '[bold]{branch}[/bold]'" if branch else ""
-    ui.print(f"    [red]❌  Conflict or error{branch_msg}.\n{err_msg}[/red]")
-
-    while True:
-        ans = ui.ask_choice(
-            "How would you like to handle this?",
-            choices=[
-                "Abort rebase and rollback",
-                "Resolve manually, then continue",
-                "Abort script without rollback",
+def rebase_continue(repo_path: str = ".") -> RebaseStatus:
+    """Continues an in-progress rebase."""
+    try:
+        run_cmd(
+            [
+                "git",
+                "-c",
+                "core.editor=true",
+                "rebase",
+                "--continue",
             ],
-            default="Abort rebase and rollback",
+            cwd=repo_path,
+            capture_output=False,
         )
+        return RebaseStatus.SUCCESS
+    except GitExecutionError as e:
+        return _parse_rebase_error(e)
 
-        match ans:
-            case "Abort script without rollback":
-                ui.print(
-                    "    [yellow]Leaving repository in current state "
-                    "(rebase in progress).[/yellow]"
-                )
-                sys.exit(1)
-            case "Resolve manually, then continue":
-                ui.print(
-                    "    [yellow]Please resolve the conflicts in another "
-                    "terminal. (DO NOT run `git rebase --continue`)[/yellow]"
-                )
-                ui.pause(
-                    "    [cyan]When the conflicts are completely "
-                    "resolved, press \\[[bold]ENTER[/bold]]...[/cyan]"
-                )
 
-                try:
-                    run_cmd(
-                        [
-                            "git",
-                            "-c",
-                            "core.editor=true",
-                            "rebase",
-                            "--continue",
-                        ],
-                        cwd=repo_path,
-                        capture_output=False,
-                    )
-                    ui.print("    ✅  Rebase finished. Continuing script...")
-                    return True
-                except GitExecutionError as e_inner:
-                    if not is_worktree_busy(repo_path):
-                        ui.print(
-                            "    [yellow]⚠️  No active rebase detected.\n"
-                            "    It seems you may have already run "
-                            "`git rebase --continue` or `--abort` "
-                            "manually.[/yellow]"
-                        )
-                        ans2 = ui.ask_choice(
-                            "Did you successfully complete the rebase?",
-                            choices=["Yes", "No (Treat as aborted)"],
-                            default="Yes",
-                        )
-                        if ans2 == "Yes":
-                            ui.print(
-                                "    ✅  Rebase assumed finished. "
-                                "Continuing script..."
-                            )
-                            return True
-                        else:
-                            ui.print("    ❌  Rebase marked as aborted.")
-                            try:
-                                run_cmd(
-                                    ["git", "rebase", "--abort"],
-                                    cwd=repo_path,
-                                    check=False,
-                                )
-                            except GitExecutionError:
-                                pass
-                            raise e_inner
-
-                    err_msg = str(e_inner)
-                    if "Error:" in err_msg:
-                        err_msg = err_msg.split("Error:", 1)[1].strip()
-                    ui.print(
-                        f"    [red]⚠️  Rebase could not continue.\n"
-                        f"{err_msg}[/red]"
-                    )
-                    continue
-            case _:
-                try:
-                    run_cmd(
-                        ["git", "rebase", "--abort"],
-                        cwd=repo_path,
-                        check=False,
-                    )
-                except GitExecutionError:
-                    pass
-                raise e
+def rebase_abort(repo_path: str = ".") -> None:
+    """Aborts an in-progress rebase."""
+    try:
+        run_cmd(
+            ["git", "rebase", "--abort"],
+            cwd=repo_path,
+            check=False,
+        )
+    except GitExecutionError:
+        pass
 
 
 def rebase_stack_onto(
-    new_parent_commit: str,
-    old_parent_commit: str,
+    new_base_commit_hash: str,
+    old_base_commit_hash: str,
     tip_branch: str,
     repo_path: str = ".",
-    ui: UI | None = None,
-) -> bool:
+) -> RebaseStatus:
     """Rebases a stack by explicitly replacing its base commit.
 
     Uses `git rebase --onto <newbase> <oldbase>` along with `--update-refs`
     and `--rebase-merges` to move the branch and all its downstream
-    dependencies to `new_parent_commit`.
+    dependencies to `new_base_commit_hash`.
 
     Use this instead of `rebase_stack` when the target branch has been
     rewritten (e.g., via a squash merge). A standard rebase would replay
     the obsolete commits, causing conflicts. This method safely transplants
-    the stack starting exactly after `old_parent_commit`.
+    the stack starting exactly after `old_base_commit_hash`.
 
     Args:
-        new_parent_commit: The new base commit.
-        old_parent_commit: The old base commit to exclude.
+        new_base_commit_hash: The new base commit hash.
+        old_base_commit_hash: The old base commit hash to exclude.
         tip_branch: The tip branch of the stack being moved.
         repo_path: Path to the git repository.
-        ui: Optional UI instance for prompting on conflict.
 
     Returns:
-        True if the rebase was successful, False if aborted due to conflict.
+        RebaseStatus indicating success, conflict, or error.
     """
     try:
         run_cmd(
@@ -154,23 +81,22 @@ def rebase_stack_onto(
                 "--update-refs",
                 "--rebase-merges",
                 "--onto",
-                new_parent_commit,
-                old_parent_commit,
+                new_base_commit_hash,
+                old_base_commit_hash,
                 tip_branch,
             ],
             cwd=repo_path,
         )
-        return True
+        return RebaseStatus.SUCCESS
     except GitExecutionError as e:
-        return _handle_rebase_conflict(e, repo_path, ui, branch=tip_branch)
+        return _parse_rebase_error(e)
 
 
 def rebase_stack(
     new_base_branch: str,
     tip_branch: str,
     repo_path: str = ".",
-    ui: UI | None = None,
-) -> bool:
+) -> RebaseStatus:
     """Rebases a stack up to a target branch using its common ancestor.
 
     Uses `git rebase --update-refs --rebase-merges` to update the given branch
@@ -184,10 +110,9 @@ def rebase_stack(
         new_base_branch: The upstream branch to rebase onto (e.g., 'main').
         tip_branch: The tip branch of the stack being caught up.
         repo_path: Path to the git repository.
-        ui: Optional UI instance for prompting on conflict.
 
     Returns:
-        True if the rebase was successful, False if aborted due to conflict.
+        RebaseStatus indicating success, conflict, or error.
     """
     try:
         run_cmd(
@@ -201,6 +126,6 @@ def rebase_stack(
             ],
             cwd=repo_path,
         )
-        return True
+        return RebaseStatus.SUCCESS
     except GitExecutionError as e:
-        return _handle_rebase_conflict(e, repo_path, ui, branch=tip_branch)
+        return _parse_rebase_error(e)
