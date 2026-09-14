@@ -149,15 +149,16 @@ def execute_push_stack(
         branches=branches_to_push,
         ui=ui,
         prompt_title=(
-            f"Push {len(branches_to_push)} branches in stack to origin?"
+            f"Push {ui.pluralize(len(branches_to_push), 'branch')} "
+            "in stack to origin?"
         ),
     )
 
     if not branches_to_push:
         if up_to_date_count > 0:
             ui.print(
-                f"✅  {up_to_date_count} branch(es) already up-to-date. "
-                "No branches to push."
+                f"✅  {ui.pluralize(up_to_date_count, 'branch')} already "
+                "up-to-date. No branches to push."
             )
         return True
 

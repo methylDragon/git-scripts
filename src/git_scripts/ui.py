@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property
 
+import inflect
 import questionary
 from rich.console import Console
 from rich.progress import Progress
@@ -175,3 +176,12 @@ class UI:
         else:
             with self.console.status(message) as status:
                 yield status
+
+    @cached_property
+    def _inflect(self):
+        """Cached inflect engine."""
+        return inflect.engine()
+
+    def pluralize(self, count: int, word: str) -> str:
+        """Returns a formatted plural string natively handling 0 as 'no'."""
+        return self._inflect.no(word, count)  # type: ignore

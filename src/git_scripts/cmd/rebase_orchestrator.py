@@ -378,10 +378,12 @@ def prompt_and_delete_merged(
             )
         )
 
-        word = "branch" if len(unique_to_delete) == 1 else "branches"
         action = ui.ask_choice(
-            f"❓  Delete the {len(unique_to_delete)} "
-            f"fully merged local {word}?",
+            "❓  Delete the {}?".format(
+                ui.pluralize(
+                    len(unique_to_delete), "fully merged local branch"
+                )
+            ),
             choices=["Skip all", "Select which to delete", "Delete all"],
             default="Skip all",
         )
@@ -391,7 +393,11 @@ def prompt_and_delete_merged(
                 selected_to_delete = unique_to_delete
             case "Select which to delete":
                 selected_to_delete = ui.ask_checkbox(
-                    f"Select fully merged local {word} to delete:",
+                    "Select {} to delete:".format(
+                        ui.pluralize(
+                            len(unique_to_delete), "fully merged local branch"
+                        )
+                    ),
                     choices=unique_to_delete,
                 )
             case _:

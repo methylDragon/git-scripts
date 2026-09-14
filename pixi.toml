@@ -38,6 +38,7 @@ filelock = ">=3.16.1,<4"
 act = ">=0.2.89,<0.3"
 vhs = ">=0.11.0,<0.12"
 pyfiglet = ">=1.0.4,<2"
+inflect = ">=7.5.0,<8"
 
 [pypi-dependencies]
 git-scripts = { path = ".", editable = true }

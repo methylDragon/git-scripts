@@ -336,10 +336,9 @@ def _print_branch_summary(
         for b in sorted(branches_without_prs):
             summary_text += f"  - [yellow]{b}[/yellow]\n"
 
-    b_plural = "branch" if len(selected_branches) == 1 else "branches"
     title_str = (
         f"[bold cyan]Branch Summary "
-        f"({len(selected_branches)} {b_plural})[/bold cyan]"
+        f"({ui.pluralize(len(selected_branches), 'branch')})[/bold cyan]"
     )
     ui.print(
         Panel(
@@ -743,9 +742,9 @@ def execute_align_pr_bases_and_sync_stacks(
             ui.print("❌  Operation cancelled.")
         return True
 
-    b_plural = "branch" if len(selected_branches) == 1 else "branches"
     ui.print(
-        f"🔍  Analyzing topology for {len(selected_branches)} {b_plural}..."
+        "🔍  Analyzing topology for "
+        f"{ui.pluralize(len(selected_branches), 'branch')}..."
     )
 
     ok, ordered_or_none, parent_map = _verify_topology(

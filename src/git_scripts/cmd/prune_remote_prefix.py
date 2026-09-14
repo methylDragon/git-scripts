@@ -190,8 +190,11 @@ def _prompt_and_delete_branches(
             to_delete.extend(obsolete_branches)
         else:
             action = ui.ask_choice(
-                f"❓  Delete {len(obsolete_branches)} obsolete "
-                "remote branches?",
+                "❓  Delete {}?".format(
+                    ui.pluralize(
+                        len(obsolete_branches), "obsolete remote branch"
+                    )
+                ),
                 choices=["Skip all", "Select which to delete", "Delete all"],
                 default="Delete all",
             )

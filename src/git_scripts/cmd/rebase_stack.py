@@ -248,9 +248,10 @@ def execute_rebase_stack(
         resolved_branches = resolve_branches_to_push(
             branches=branches_list,
             ui=ui,
-            prompt_title=(
-                f"Push {len(batch_result.branches_to_keep)} updated "
-                "branches to origin?"
+            prompt_title="Push {} to origin?".format(
+                ui.pluralize(
+                    len(batch_result.branches_to_keep), "updated branch"
+                )
             ),
         )
         if resolved_branches:

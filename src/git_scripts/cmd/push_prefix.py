@@ -66,8 +66,8 @@ def execute_push_prefix(
     if not resolved_branches:
         if up_to_date_count > 0:
             ui.print(
-                f"✅  {up_to_date_count} branch(es) already up-to-date. "
-                "No branches to push."
+                f"✅  {ui.pluralize(up_to_date_count, 'branch')} already "
+                "up-to-date. No branches to push."
             )
         return True
 

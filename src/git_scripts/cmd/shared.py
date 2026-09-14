@@ -110,7 +110,9 @@ def resolve_branches_to_push(
     branches_to_push = list(branches)
     if not ui.auto_yes:
         if prompt_title is None:
-            prompt_title = f"Push {len(branches)} branches to origin?"
+            prompt_title = (
+                f"Push {ui.pluralize(len(branches), 'branch')} to origin?"
+            )
         action = ui.ask_choice(
             f"❓  {prompt_title}",
             choices=["Push all", "Select which to push", "Skip all"],

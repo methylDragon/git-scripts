@@ -443,7 +443,9 @@ def execute_evolve(
             branches=branches_to_push,
             ui=ui,
             prompt_title=(
-                f"Push {len(branches_to_push)} updated branches to origin?"
+                "Push "
+                f"{ui.pluralize(len(branches_to_push), 'updated branch')} "
+                "to origin?"
             ),
         )
         if resolved_branches:

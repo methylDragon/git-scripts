@@ -82,8 +82,9 @@ def execute_prune_local(
 
     if not ui.auto_yes:
         action = ui.ask_choice(
-            f"❓  Delete the {len(branches_to_prune)} "
-            "orphaned local branches?",
+            "❓  Delete the {}?".format(
+                ui.pluralize(len(branches_to_prune), "orphaned local branch")
+            ),
             choices=["Skip all", "Select which to delete", "Delete all"],
             default="Skip all",
         )
