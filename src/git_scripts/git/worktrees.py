@@ -1,5 +1,6 @@
 """Git worktree management utilities."""
 
+import json
 import os
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -7,6 +8,87 @@ from dataclasses import dataclass
 
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.models import WorktreeState
+
+STATE_FILE_NAME = "git-scripts-worktree-state.json"
+
+
+def _get_state_file_path(repo_path: str = ".") -> str | None:
+    try:
+        common_dir = run_cmd(
+            ["git", "rev-parse", "--git-common-dir"], cwd=repo_path
+        )
+        return os.path.abspath(
+            os.path.join(repo_path, common_dir, STATE_FILE_NAME)
+        )
+    except GitExecutionError:
+        return None
+
+
+def _save_worktree_state(state: WorktreeState, repo_path: str = ".") -> None:
+    path = _get_state_file_path(repo_path)
+    if not path:
+        return
+
+    abs_detached = {
+        os.path.abspath(wt): branch
+        for wt, branch in state.detached_map.items()
+    }
+
+    data = {
+        "detached_map": abs_detached,
+        "failed_branches": list(state.failed_branches),
+    }
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
+def _clear_worktree_state(repo_path: str = ".") -> None:
+    path = _get_state_file_path(repo_path)
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def get_pending_recoveries(repo_path: str = ".") -> dict[str, str]:
+    """Returns a map of worktrees that remain in a detached HEAD state.
+
+    Reads the persisted worktree state to find previously detached worktrees.
+    Worktrees that no longer exist or have since checked out a branch natively
+    are excluded from the recovery payload.
+    """
+    path = _get_state_file_path(repo_path)
+    if not path or not os.path.exists(path):
+        return {}
+
+    try:
+        with open(path, encoding="utf-8") as file_handle:
+            data = json.load(file_handle)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    detached_map = data.get("detached_map", {})
+    pending = {}
+
+    for worktree, branch in detached_map.items():
+        if not os.path.exists(worktree):
+            continue
+
+        try:
+            current = run_cmd(
+                ["git", "branch", "--show-current"], cwd=worktree
+            )
+            if current == "":
+                pending[worktree] = branch
+        except GitExecutionError:
+            pass
+
+    return pending
 
 
 def is_in_another_worktree(repo_path: str, branch_name: str) -> bool:
@@ -111,9 +193,12 @@ def _detach_worktrees(
         )
     except GitExecutionError as e:
         callbacks.on_debug(str(e))
-        return WorktreeState(
+        state = WorktreeState(
             detached_map=detached_map, failed_branches=failed_branches
         )
+        if detached_map:
+            _save_worktree_state(state, repo_path)
+        return state
 
     try:
         toplevel = run_cmd(
@@ -140,9 +225,11 @@ def _detach_worktrees(
                 callbacks=callbacks,
             )
 
-    return WorktreeState(
+    state = WorktreeState(
         detached_map=detached_map, failed_branches=failed_branches
     )
+    _save_worktree_state(state, repo_path)
+    return state
 
 
 def _reattach_worktrees(
@@ -181,6 +268,8 @@ def manage_worktrees(
         )
     try:
         yield state
-    finally:
         if active:
             _reattach_worktrees(state.detached_map, repo_path, callbacks)
+            _clear_worktree_state(repo_path)
+    except Exception:
+        raise

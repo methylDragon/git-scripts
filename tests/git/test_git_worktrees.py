@@ -6,6 +6,8 @@ from absl.testing import absltest
 from git_scripts.git.core import run_cmd
 from git_scripts.git.worktrees import (
     WorktreeLifecycleCallbacks,
+    _get_state_file_path,
+    get_pending_recoveries,
     manage_worktrees,
 )
 from tests.helpers import GitTestRepo
@@ -90,6 +92,77 @@ class TestGitWorktrees(absltest.TestCase):
         # After exiting the context manager, both should be reattached
         out_a = run_cmd(["git", "branch", "--show-current"], cwd=wt_a)
         self.assertEqual(out_a, "test-chain-a")
+
+    def test_manage_worktrees_preserves_state_file_on_exception(self):
+        # A secondary worktree is required to trigger detachment logic
+        # without affecting the active HEAD.
+        self.repo_helper.checkout("main")
+        wt_b = os.path.join(self.repo_helper.temp_dir.name, "wt_b")
+        self.repo_helper.create_worktree(wt_b, "test-chain-a")
+
+        state_path = _get_state_file_path(self.repo_helper.path)
+        self.assertIsNotNone(state_path)
+        assert state_path is not None
+        self.assertFalse(os.path.exists(state_path))
+
+        try:
+            with manage_worktrees(
+                active=True,
+                repo_path=self.repo_helper.path,
+                target_branches=["test-chain-a"],
+            ):
+                self.assertTrue(os.path.exists(state_path))
+
+                # Verify pending recoveries are detectable while actively
+                # detached within the context manager.
+                pending = get_pending_recoveries(self.repo_helper.path)
+                self.assertIn(os.path.abspath(wt_b), pending)
+                self.assertEqual(
+                    pending[os.path.abspath(wt_b)], "test-chain-a"
+                )
+
+                raise RuntimeError("Simulate a crash")
+        except RuntimeError:
+            pass
+
+        # Verify the state file persists and worktrees remain detached
+        # when an exception bypasses the finally block.
+        self.assertTrue(os.path.exists(state_path))
+
+        pending = get_pending_recoveries(self.repo_helper.path)
+        self.assertIn(os.path.abspath(wt_b), pending)
+
+    def test_get_pending_recoveries_ignores_worktrees_that_were_manually_fixed(
+        self,
+    ):
+        self.repo_helper.checkout("main")
+        wt_b = os.path.join(self.repo_helper.temp_dir.name, "wt_b")
+        self.repo_helper.create_worktree(wt_b, "test-chain-a")
+
+        state_path = _get_state_file_path(self.repo_helper.path)
+        assert state_path is not None
+
+        try:
+            with manage_worktrees(
+                active=True,
+                repo_path=self.repo_helper.path,
+                target_branches=["test-chain-a"],
+            ):
+                raise RuntimeError("Simulate a crash")
+        except RuntimeError:
+            pass
+
+        # Validate initial crash state.
+        pending = get_pending_recoveries(self.repo_helper.path)
+        self.assertIn(os.path.abspath(wt_b), pending)
+
+        # Simulate a manual git-checkout recovery by the user.
+        run_cmd(["git", "checkout", "test-chain-a"], cwd=wt_b)
+
+        # Verify the explicit branch checkout clears the pending state,
+        # overriding the stale state file.
+        pending_after_fix = get_pending_recoveries(self.repo_helper.path)
+        self.assertNotIn(os.path.abspath(wt_b), pending_after_fix)
 
 
 if __name__ == "__main__":
