@@ -41,7 +41,7 @@ def create_rebase_plan(
 
 def execute_rebase_plan(
     plan: BranchRebasePlan, repo_path: str, target: str
-) -> RebaseStatus:
+) -> tuple[RebaseStatus, str | None]:
     """Executes a pre-computed rebase plan by dispatching pure git commands."""
     match plan.action:
         case RebaseAction.REBASE_ONTO_SYNC if (
@@ -67,4 +67,4 @@ def execute_rebase_plan(
                 repo_path=repo_path,
             )
         case _:
-            return RebaseStatus.ERROR
+            return RebaseStatus.ERROR, None

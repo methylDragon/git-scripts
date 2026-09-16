@@ -4,7 +4,9 @@ from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.models import RebaseStatus
 
 
-def _parse_rebase_error(e: GitExecutionError) -> RebaseStatus:
+def _parse_rebase_error(
+    e: GitExecutionError,
+) -> tuple[RebaseStatus, str | None]:
     """Parses a GitExecutionError to determine if it's a conflict or fatal."""
     err_msg = str(e).lower()
     if (
@@ -12,11 +14,11 @@ def _parse_rebase_error(e: GitExecutionError) -> RebaseStatus:
         or "could not apply" in err_msg
         or "patch failed" in err_msg
     ):
-        return RebaseStatus.CONFLICT
-    return RebaseStatus.ERROR
+        return RebaseStatus.CONFLICT, str(e)
+    return RebaseStatus.ERROR, str(e)
 
 
-def rebase_continue(repo_path: str = ".") -> RebaseStatus:
+def rebase_continue(repo_path: str = ".") -> tuple[RebaseStatus, str | None]:
     """Continues an in-progress rebase."""
     try:
         run_cmd(
@@ -30,7 +32,7 @@ def rebase_continue(repo_path: str = ".") -> RebaseStatus:
             cwd=repo_path,
             capture_output=False,
         )
-        return RebaseStatus.SUCCESS
+        return RebaseStatus.SUCCESS, None
     except GitExecutionError as e:
         return _parse_rebase_error(e)
 
@@ -52,7 +54,7 @@ def rebase_stack_onto(
     old_base_commit_hash: str,
     tip_branch: str,
     repo_path: str = ".",
-) -> RebaseStatus:
+) -> tuple[RebaseStatus, str | None]:
     """Rebases a stack by explicitly replacing its base commit.
 
     Uses `git rebase --onto <newbase> <oldbase>` along with `--update-refs`
@@ -87,7 +89,7 @@ def rebase_stack_onto(
             ],
             cwd=repo_path,
         )
-        return RebaseStatus.SUCCESS
+        return RebaseStatus.SUCCESS, None
     except GitExecutionError as e:
         return _parse_rebase_error(e)
 
@@ -96,7 +98,7 @@ def rebase_stack(
     new_base_branch: str,
     tip_branch: str,
     repo_path: str = ".",
-) -> RebaseStatus:
+) -> tuple[RebaseStatus, str | None]:
     """Rebases a stack up to a target branch using its common ancestor.
 
     Uses `git rebase --update-refs --rebase-merges` to update the given branch
@@ -126,6 +128,6 @@ def rebase_stack(
             ],
             cwd=repo_path,
         )
-        return RebaseStatus.SUCCESS
+        return RebaseStatus.SUCCESS, None
     except GitExecutionError as e:
         return _parse_rebase_error(e)

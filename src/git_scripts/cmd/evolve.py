@@ -243,14 +243,14 @@ def process_single_evolve_stack(
     resolved_old_hash: str,
     ui: UI,
     failed_branches: set[str],
-) -> tuple[bool, list[str]]:
-    """Evolves a single stack, returning success status and evolved refs."""
+) -> tuple[bool, list[str], str | None]:
+    """Evolves a single stack. Returns success, evolved refs, and err_msg."""
     ui.print(f"🔗  Reconnecting stack '{tip}'...")
     stack_refs = get_stack_branches(repo, tip)
 
     if any(b in failed_branches for b in stack_refs) or tip in failed_branches:
         ui.print("    [red]⚠️  Skipping due to busy or dirty worktree.[/red]")
-        return False, []
+        return False, [], None
 
     sync_point = analyzer.get_sync_point(tip)
 
@@ -274,10 +274,10 @@ def process_single_evolve_stack(
             cut_point=resolved_old_hash,
         )
 
-    status = execute_rebase_plan(plan, repo_path, new_hash)
+    status, err_msg = execute_rebase_plan(plan, repo_path, new_hash)
 
     if status == RebaseStatus.CONFLICT:
-        status = handle_interactive_conflict(repo_path, ui, tip)
+        status, err_msg = handle_interactive_conflict(repo_path, ui, tip)
 
     successfully_evolved = []
     if status == RebaseStatus.SUCCESS:
@@ -285,10 +285,10 @@ def process_single_evolve_stack(
         for ref in stack_refs:
             if ref in orphans:
                 successfully_evolved.append(ref)
-        return True, successfully_evolved
+        return True, successfully_evolved, None
     else:
         ui.print("    💥 Conflict or error. Aborting...")
-        return False, []
+        return False, [], err_msg if status != RebaseStatus.CONFLICT else None
 
 
 def evolve_loop(
@@ -317,7 +317,7 @@ def evolve_loop(
     ) as wt_state:
         failed_branches = wt_state.failed_branches
         for tip in analyzer.tips:
-            success, evolved_refs = process_single_evolve_stack(
+            success, evolved_refs, err_msg = process_single_evolve_stack(
                 tip,
                 repo_path,
                 repo,
@@ -332,9 +332,15 @@ def evolve_loop(
                 success_count += 1
                 successfully_evolved_branches.extend(evolved_refs)
             else:
-                failed_log.append(
-                    format_stack_tree(repo, tip, allowed_refs=set(orphans))
+                tree_str = format_stack_tree(
+                    repo, tip, allowed_refs=set(orphans)
                 )
+                if err_msg:
+                    indented_err = "\n".join(
+                        "      " + line for line in err_msg.splitlines()
+                    )
+                    tree_str += f"\n{indented_err}"
+                failed_log.append(tree_str)
 
     return success_count, failed_log, successfully_evolved_branches
 

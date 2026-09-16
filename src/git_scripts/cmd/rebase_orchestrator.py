@@ -35,7 +35,7 @@ from git_scripts.ui import UI
 
 def handle_interactive_conflict(
     repo_path: str, ui: UI, branch: str
-) -> RebaseStatus:
+) -> tuple[RebaseStatus, str | None]:
     """Handles an interactive rebase conflict loop."""
     branch_msg = f" on branch '[bold]{branch}[/bold]'" if branch else ""
     ui.print(f"    [red]❌  Conflict detected{branch_msg}.[/red]")
@@ -72,12 +72,12 @@ def handle_interactive_conflict(
                         "resolved, press \\[[bold]ENTER[/bold]]...[/cyan]"
                     )
 
-                    status = rebase_continue(repo_path)
+                    status, err_msg = rebase_continue(repo_path)
                     if status == RebaseStatus.SUCCESS:
                         ui.print(
                             "    ✅  Rebase finished. Continuing script..."
                         )
-                        return RebaseStatus.SUCCESS
+                        return RebaseStatus.SUCCESS, None
                     else:
                         if not is_worktree_busy(repo_path):
                             ui.print(
@@ -96,11 +96,11 @@ def handle_interactive_conflict(
                                     "    ✅  Rebase assumed finished. "
                                     "Continuing script..."
                                 )
-                                return RebaseStatus.SUCCESS
+                                return RebaseStatus.SUCCESS, None
                             else:
                                 ui.print("    ❌  Rebase marked as aborted.")
                                 rebase_abort(repo_path)
-                                return RebaseStatus.ERROR
+                                return RebaseStatus.ERROR, None
 
                         ui.print(
                             "    [red]⚠️  Rebase could not continue. "
@@ -109,7 +109,7 @@ def handle_interactive_conflict(
                         continue
                 case _:
                     rebase_abort(repo_path)
-                    return RebaseStatus.ERROR
+                    return RebaseStatus.ERROR, None
 
 
 def check_and_report_worktree_blocks(
@@ -195,10 +195,14 @@ def rebase_single_branch(
         result.branches_to_delete.update(stack_refs)
         return result
 
-    status = execute_rebase_plan(plan, config.repo_path, config.target)
+    status, err_msg = execute_rebase_plan(
+        plan, config.repo_path, config.target
+    )
 
     if status == RebaseStatus.CONFLICT:
-        status = handle_interactive_conflict(config.repo_path, ui, branch)
+        status, err_msg = handle_interactive_conflict(
+            config.repo_path, ui, branch
+        )
 
     if status == RebaseStatus.SUCCESS:
         try:
@@ -230,16 +234,21 @@ def rebase_single_branch(
         except Exception:
             pass
     else:
-        result.failed_log.append(
-            format_stack_tree(
-                repo,
-                branch,
-                config.prefix,
-                config.target,
-                False,
-                config.branch_pool,
-            )
+        tree_str = format_stack_tree(
+            repo,
+            branch,
+            config.prefix,
+            config.target,
+            False,
+            config.branch_pool,
         )
+        if err_msg and status != RebaseStatus.CONFLICT:
+            # Append the error message under the tree, indented for readability
+            indented_err = "\n".join(
+                "      " + line for line in err_msg.splitlines()
+            )
+            tree_str += f"\n{indented_err}"
+        result.failed_log.append(tree_str)
 
     return result
 

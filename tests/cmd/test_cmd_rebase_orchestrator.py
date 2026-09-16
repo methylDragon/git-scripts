@@ -28,7 +28,9 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         mock_ui = MagicMock()
         mock_ui.ask_choice.return_value = "Abort rebase and rollback"
 
-        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+        status, err_msg = handle_interactive_conflict(
+            ".", mock_ui, "my-branch"
+        )
 
         self.assertEqual(status, RebaseStatus.ERROR)
         mock_rebase_abort.assert_called_once_with(".")
@@ -39,9 +41,11 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
     ):
         mock_ui = MagicMock()
         mock_ui.ask_choice.return_value = "Resolve manually, then continue"
-        mock_rebase_continue.return_value = RebaseStatus.SUCCESS
+        mock_rebase_continue.return_value = (RebaseStatus.SUCCESS, None)
 
-        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+        status, err_msg = handle_interactive_conflict(
+            ".", mock_ui, "my-branch"
+        )
 
         self.assertEqual(status, RebaseStatus.SUCCESS)
         mock_rebase_continue.assert_called_once_with(".")
@@ -59,10 +63,12 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
             "Resolve manually, then continue",
             "Yes",
         ]
-        mock_rebase_continue.return_value = RebaseStatus.CONFLICT
+        mock_rebase_continue.return_value = (RebaseStatus.CONFLICT, "conflict")
         mock_is_worktree_busy.return_value = False
 
-        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+        status, err_msg = handle_interactive_conflict(
+            ".", mock_ui, "my-branch"
+        )
 
         self.assertEqual(status, RebaseStatus.SUCCESS)
         mock_is_worktree_busy.assert_called_once_with(".")
@@ -79,10 +85,12 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
             "Resolve manually, then continue",
             "No (Treat as aborted)",
         ]
-        mock_rebase_continue.return_value = RebaseStatus.CONFLICT
+        mock_rebase_continue.return_value = (RebaseStatus.CONFLICT, "conflict")
         mock_is_worktree_busy.return_value = False
 
-        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+        status, err_msg = handle_interactive_conflict(
+            ".", mock_ui, "my-branch"
+        )
 
         self.assertEqual(status, RebaseStatus.ERROR)
         mock_rebase_abort.assert_called_once_with(".")
@@ -96,12 +104,14 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         # Loops once because still busy, then succeeds
         mock_ui.ask_choice.return_value = "Resolve manually, then continue"
         mock_rebase_continue.side_effect = [
-            RebaseStatus.CONFLICT,
-            RebaseStatus.SUCCESS,
+            (RebaseStatus.CONFLICT, "conflict"),
+            (RebaseStatus.SUCCESS, None),
         ]
         mock_is_worktree_busy.return_value = True
 
-        status = handle_interactive_conflict(".", mock_ui, "my-branch")
+        status, err_msg = handle_interactive_conflict(
+            ".", mock_ui, "my-branch"
+        )
 
         self.assertEqual(status, RebaseStatus.SUCCESS)
         self.assertEqual(mock_rebase_continue.call_count, 2)
