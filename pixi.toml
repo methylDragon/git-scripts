@@ -17,6 +17,8 @@ git-push-stack = "python -m git_scripts.cli push-stack"
 git-evolve = "python -m git_scripts.cli evolve"
 git-prune-local = "python -m git_scripts.cli prune-local"
 git-prune-remote-prefix = "python -m git_scripts.cli prune-remote-prefix"
+git-gk-optimize = "python -m git_scripts.cli gk-optimize"
+build-gk-shim = "cmake --fresh -S src/git_scripts/gk/optimize/csrc -B build/gk_shim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/gk_shim"
 
 # --- Media Generation ---
 media-gen = "python media-gen/generate.py"
@@ -31,6 +33,7 @@ absl-py = ">=2.5.0,<3"
 ruff = ">=0.16.0,<0.17"
 pytest = ">=8.3.4,<9"
 pydantic = ">=2.13.4,<3"
+pyyaml = ">=6.0.2,<7"
 pytest-xdist = ">=3.8.0,<4"
 pre-commit = ">=4.6.1,<5"
 typer = ">=0.27.0,<0.28"
@@ -40,6 +43,12 @@ vhs = ">=0.11.0,<0.12"
 pyfiglet = ">=1.0.4,<2"
 inflect = ">=7.5.0,<8"
 
+[target.linux-64.dependencies]
+c-compiler = "*"
+cmake = ">=3.28,<5"
+ninja = ">=1.11,<2"
+
 [pypi-dependencies]
 git-scripts = { path = ".", editable = true }
 pytest-cov = ">=7.1.0, <8"
+

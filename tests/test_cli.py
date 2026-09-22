@@ -1,3 +1,7 @@
+"""Unit tests for top-level CLI subcommand routing."""
+
+# pylint: disable=missing-function-docstring
+
 from unittest import mock
 
 from absl.testing import absltest
@@ -6,6 +10,8 @@ from git_scripts.cli import main
 
 
 class TestCli(absltest.TestCase):
+    """Verifies main() routes CLI subcommands to their execution handlers."""
+
     @mock.patch("sys.argv", ["git-scripts", "rebase-prefix", "feat/"])
     @mock.patch("git_scripts.cli.execute_rebase_prefix")
     def test_main_routes_to_rebase_prefix_when_invoked(self, mock_exec):
@@ -65,3 +71,17 @@ class TestCli(absltest.TestCase):
         except SystemExit as e:
             self.assertEqual(e.code, 0)
         mock_exec.assert_called_once()
+
+    @mock.patch(
+        "sys.argv",
+        ["git-scripts", "gk-optimize", "install", "--keep-recent-tags", "5"],
+    )
+    @mock.patch("git_scripts.cli.execute_gk_install")
+    def test_main_routes_to_gk_optimize_install_when_invoked(self, mock_exec):
+        mock_exec.return_value = mock.MagicMock(success=True)
+        try:
+            main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        mock_exec.assert_called_once()
+        self.assertEqual(mock_exec.call_args.kwargs["keep_recent_override"], 5)

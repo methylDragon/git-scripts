@@ -10,8 +10,11 @@ dependencies = [
     "rich",
     "questionary",
     "pydantic",
+    "pyyaml",
 ]
 
 [project.scripts]
 git-rebase-prefix = "git_scripts.cli:main"
 git-push-prefix = "git_scripts.cli:main"
+git-gk-optimize = "git_scripts.cli:main"
+

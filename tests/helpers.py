@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -197,8 +198,32 @@ git branch -m main
             cmd.append("--no-ff")
         run_git(cmd, cwd=self.path)
 
-    def create_worktree(self, path: str, branch: str):
-        run_git(["worktree", "add", path, branch], cwd=self.path)
+    def create_worktree(
+        self,
+        path: str,
+        branch: str,
+        create_branch: bool = False,
+    ):
+        cmd = ["worktree", "add"]
+        if create_branch:
+            cmd.extend(["-b", branch, path])
+        else:
+            cmd.extend([path, branch])
+        run_git(cmd, cwd=self.path)
+
+    def tag(
+        self, tag_name: str, ref: str | None = None, force: bool = False
+    ) -> None:
+        cmd = ["tag"]
+        if force:
+            cmd.append("-f")
+        cmd.append(tag_name)
+        if ref:
+            cmd.append(ref)
+        run_git(cmd, cwd=self.path)
+
+    def add_remote(self, name: str, url: str) -> None:
+        run_git(["remote", "add", name, url], cwd=self.path)
 
     def rev_parse(self, rev: str) -> str:
         res = run_git(["rev-parse", rev], cwd=self.path)
@@ -206,3 +231,57 @@ git branch -m main
 
     def get_pygit2_repo(self) -> pygit2.Repository:
         return pygit2.Repository(self.path)
+
+
+def setup_multi_worktree_gk_repo(
+    repo_helper: GitTestRepo, base_dir: pathlib.Path
+) -> tuple[pathlib.Path, pathlib.Path]:
+    """Populates a GitTestRepo with CI tags, bazel symlinks, and a worktree."""
+    main_repo = pathlib.Path(repo_helper.path)
+    repo_helper.add_remote("origin", "https://example.com/repo.git")
+    repo_helper.commit("add gitignore", ".gitignore", "bazel-*\n")
+
+    for vtag in ("v1.0.0", "v2.0.0", "internal-milestone-1"):
+        repo_helper.tag(vtag)
+
+    for i in range(1, 16):
+        repo_helper.tag(f"candidate/2026-01-{i:02d}")
+    for i in range(1, 13):
+        repo_helper.tag(f"release/2026.{i:02d}")
+
+    fake_bazel_cache = base_dir / "bazel_cache_execroot"
+    fake_bazel_cache.mkdir(parents=True, exist_ok=True)
+    (main_repo / "bazel-out").symlink_to(fake_bazel_cache)
+
+    wt_repo = base_dir / "repo-wt-1"
+    repo_helper.create_worktree(str(wt_repo), "feat/wt1", create_branch=True)
+    (wt_repo / "bazel-out").symlink_to(fake_bazel_cache)
+    return main_repo, wt_repo
+
+
+def create_fake_gitkraken_home(
+    base_dir: pathlib.Path,
+) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+    """Creates a mock ~/.gitkraken profile and bloated repoSettings file."""
+    home_dir = base_dir / "home"
+    gk_root = home_dir / ".gitkraken"
+    profile_dir = gk_root / "profiles" / "d6e5a8ca26e14325a4275fc33b17e16f"
+    rs_dir = profile_dir / "repoSettings"
+    rs_dir.mkdir(parents=True, exist_ok=True)
+
+    profile_file = profile_dir / "profile"
+    profile_data = {
+        "selectedGitPath": "/usr/bin/git",
+        "repoInitDetails": {
+            "openTab1": {"repoPath": "/keep/open/tab/1"},
+            "openTab2": {"repoPath": "/keep/open/tab/2"},
+        },
+    }
+    profile_file.write_text(json.dumps(profile_data), encoding="utf-8")
+
+    rs_file = rs_dir / "insrc-mock.json"
+    vis = {"visible": True}
+    tags_map = {f"candidate/2026-01-{i:02d}": vis for i in range(1, 16)}
+    tags_map["v1.0.0"] = {"visible": True}
+    rs_file.write_text(json.dumps({"tags": tags_map}), encoding="utf-8")
+    return home_dir, profile_file, rs_file

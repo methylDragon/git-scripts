@@ -1,0 +1,35 @@
+# Default configuration for git-gk-optimize
+
+tags:
+  # Keep 100% of tags that do not match any pattern in keep_recent_by_pattern.
+  keep_other_tags: true
+
+  # Minimum hours between background tag prune passes (unless packed-refs spikes >8 KB).
+  prune_interval_hours: 12.0
+
+  # Glob pattern -> number of newest tags (by creatordate) to retain locally.
+  keep_recent_by_pattern:
+    "candidate/*": 5
+    "release/*": 5
+    "platform/*": 5
+
+  # Historical tag globs excluded from CLI `git fetch` via `^refs/tags/<pattern>`.
+  blocked_fetch_patterns:
+    - "candidate/20*"
+    - "platform/20*"
+    - "release/20*"
+
+watcher:
+  # Directory names hidden from GitKraken's NSFW (Node Sentinel File Watcher,
+  # @axosoft/nsfw) inotify directory crawler.
+  ignored_dirs:
+    - "node_modules"
+    - ".venv"
+    - ".pixi"
+    - "target"
+    - ".cache"
+    - ".pnpm-store"
+    - ".mypy_cache"
+    - ".ruff_cache"
+    - "__pycache__"
+    - ".pytest_cache"

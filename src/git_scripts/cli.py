@@ -1,5 +1,8 @@
 """Command-line interface definition and routing."""
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
+
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -8,15 +11,27 @@ from git_scripts.cmd.evolve import execute_evolve
 from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
     execute_align_pr_bases_and_sync_stacks,
 )
+from git_scripts.cmd.gk_optimize import (
+    execute_gk_install,
+    execute_gk_uninstall,
+    execute_gk_verify,
+)
 from git_scripts.cmd.prune_local import execute_prune_local
 from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
 from git_scripts.cmd.push_prefix import execute_push_prefix
 from git_scripts.cmd.push_stack import execute_push_stack
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
 from git_scripts.cmd.rebase_stack import execute_rebase_stack
+from git_scripts.gk.optimize.models import GkExpectMode
+from git_scripts.gk.optimize.watcher import execute_watch_daemon
 from git_scripts.ui import UI
 
 app = typer.Typer(help="Git Stack Utilities", add_completion=False)
+gk_app = typer.Typer(
+    help="Optimize GitKraken Desktop worktree switching and auto-refresh",
+    add_completion=False,
+)
+app.add_typer(gk_app, name="gk-optimize")
 
 
 @app.command("rebase-stack")
@@ -24,7 +39,7 @@ def rebase_stack(
     target: Annotated[
         str,
         typer.Argument(
-            help="Target branch to rebase onto (defaults to 'main')"
+            help="Target branch to rebase onto (defaults to 'main')",
         ),
     ] = "main",
     all_worktrees: Annotated[
@@ -43,7 +58,9 @@ def rebase_stack(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
     target_opt: Annotated[
@@ -90,7 +107,9 @@ def rebase_prefix(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
 ):
@@ -118,7 +137,8 @@ def rebase_prefix(
 def push_stack(
     ctx: typer.Context,
     target: Annotated[
-        str, typer.Option("--target", help="Target branch")
+        str,
+        typer.Option("--target", help="Target branch"),
     ] = "main",
     plain: Annotated[
         bool,
@@ -130,7 +150,9 @@ def push_stack(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
 ):
@@ -171,7 +193,9 @@ def push_prefix(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
     all_worktrees: Annotated[
@@ -200,7 +224,8 @@ def push_prefix(
 @app.command("evolve")
 def evolve(
     old_hash: Annotated[
-        str | None, typer.Argument(help="Old base commit sha")
+        str | None,
+        typer.Argument(help="Old base commit sha"),
     ] = None,
     plain: Annotated[
         bool,
@@ -212,7 +237,9 @@ def evolve(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
 ):
@@ -243,7 +270,9 @@ def prune_local(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
 ):
@@ -279,7 +308,9 @@ def prune_remote_prefix(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
 ):
@@ -302,7 +333,7 @@ def gh_align_pr_bases_and_sync_stacks(
     prefix: Annotated[
         str | None,
         typer.Argument(
-            help="Prefix to match (optional, defaults to current stack)"
+            help="Prefix to match (optional, defaults to current stack)",
         ),
     ] = None,
     target: Annotated[str, typer.Argument(help="Target branch")] = "main",
@@ -332,7 +363,9 @@ def gh_align_pr_bases_and_sync_stacks(
     yes: Annotated[
         bool,
         typer.Option(
-            "-y", "--yes", help="Automatically bypass confirmation prompts"
+            "-y",
+            "--yes",
+            help="Automatically bypass confirmation prompts",
         ),
     ] = False,
 ):
@@ -349,6 +382,124 @@ def gh_align_pr_bases_and_sync_stacks(
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)
+
+
+@gk_app.command("install")
+def gk_install(
+    repo_path: Annotated[
+        str, typer.Argument(help="Path to target repository or worktree")
+    ] = ".",
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", help="Path to custom YAML config file"),
+    ] = None,
+    keep_recent_tags: Annotated[
+        int | None,
+        typer.Option(
+            "--keep-recent-tags",
+            help="Override recent tag count kept per configured pattern",
+        ),
+    ] = None,
+    close_gitkraken: Annotated[
+        bool,
+        typer.Option(
+            "--close-gitkraken",
+            help="Close running GitKraken instances before applying settings",
+        ),
+    ] = False,
+    plain: Annotated[
+        bool,
+        typer.Option("--plain", help="Disable rich formatting"),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("-y", "--yes", help="Bypass confirmation prompts"),
+    ] = False,
+):
+    """Installs GitKraken worktree switching and auto-refresh optimizations."""
+    ui = UI(plain=plain, auto_yes=yes)
+    result = execute_gk_install(
+        repo_path=repo_path,
+        ui=ui,
+        config_path=config,
+        keep_recent_override=keep_recent_tags,
+        close_gitkraken=close_gitkraken,
+    )
+    raise typer.Exit(code=0 if result.success else 1)
+
+
+@gk_app.command("verify")
+def gk_verify(
+    repo_path: Annotated[
+        str, typer.Argument(help="Path to target repository or worktree")
+    ] = ".",
+    expect: Annotated[
+        GkExpectMode,
+        typer.Option(
+            "--expect",
+            help="Expected state (installed/uninstalled)",
+        ),
+    ] = GkExpectMode.INSTALLED,
+    plain: Annotated[
+        bool,
+        typer.Option("--plain", help="Disable rich formatting"),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("-y", "--yes", help="Bypass confirmation prompts"),
+    ] = False,
+):
+    """Verifies whether GitKraken optimizations are active or reverted."""
+    ui = UI(plain=plain, auto_yes=yes)
+    result = execute_gk_verify(repo_path=repo_path, ui=ui, expect=expect)
+    raise typer.Exit(code=0 if result.passed else 1)
+
+
+@gk_app.command("uninstall")
+def gk_uninstall(
+    repo_path: Annotated[
+        str, typer.Argument(help="Path to target repository or worktree")
+    ] = ".",
+    close_gitkraken: Annotated[
+        bool,
+        typer.Option(
+            "--close-gitkraken",
+            help="Close running GitKraken instances before reverting settings",
+        ),
+    ] = False,
+    plain: Annotated[
+        bool,
+        typer.Option("--plain", help="Disable rich formatting"),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("-y", "--yes", help="Bypass confirmation prompts"),
+    ] = False,
+):
+    """Reverts GitKraken optimizations safely via Compare-And-Swap."""
+    ui = UI(plain=plain, auto_yes=yes)
+    result = execute_gk_uninstall(
+        repo_path=repo_path,
+        ui=ui,
+        close_gitkraken=close_gitkraken,
+    )
+    raise typer.Exit(code=0 if result.success else 1)
+
+
+@gk_app.command("watch-daemon", hidden=True)
+def gk_watch_daemon(
+    common_git_dir: Annotated[
+        Path, typer.Argument(help="Path to shared .git common directory")
+    ],
+    gk_pid: Annotated[
+        int | None,
+        typer.Option("--gk-pid", help="GitKraken PID for daemon auto-exit"),
+    ] = None,
+):
+    """Runs singleton background watcher for worktree refresh & tag windows."""
+    common_resolved = common_git_dir.resolve()
+    ok = execute_watch_daemon(common_git_dir=common_resolved, gk_pid=gk_pid)
+    raise typer.Exit(code=0 if ok else 1)
 
 
 def main():

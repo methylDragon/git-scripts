@@ -15,8 +15,9 @@ fi
 BIN_DIR="$HOME/.local/bin"
 
 if [ "$LOCAL_INSTALL" -eq 1 ]; then
+  INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  cd "$INSTALL_DIR"
   echo "📦 Installing git-scripts locally from $(pwd)..."
-  INSTALL_DIR="$(pwd)"
 else
   echo "📦 Installing git-scripts..."
   INSTALL_DIR="$HOME/.local/share/git-scripts"
@@ -33,6 +34,7 @@ else
 fi
 
 echo "🏗️ Setting up pixi environment..."
+export PATH="$HOME/.pixi/bin:$PATH"
 # Ensure pixi is installed
 if ! command -v pixi &>/dev/null; then
   echo "⚠️ 'pixi' not found. Installing pixi..."
@@ -47,6 +49,7 @@ echo "🔗 Symlinking binaries to $BIN_DIR..."
 mkdir -p "$BIN_DIR"
 for script in bin/git-*; do
   script_name=$(basename "$script")
+  chmod +x "$INSTALL_DIR/$script"
   ln -sf "$INSTALL_DIR/$script" "$BIN_DIR/$script_name"
   echo "   -> Created $script_name"
 done
