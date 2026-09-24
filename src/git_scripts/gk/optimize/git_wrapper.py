@@ -1,4 +1,8 @@
-"""GitKraken selectedGitPath wrapper scrubbing LD_PRELOAD & filtering tags."""
+"""GitKraken `selectedGitPath` wrapper.
+
+Scrubs `LD_PRELOAD` before invoking `/usr/bin/git` and filters remote tag
+operations (`ls-remote --tags`, `fetch`) to the configured retention window.
+"""
 
 import fnmatch
 import os
@@ -13,26 +17,47 @@ except ImportError:
     yaml = None
 
 REAL_GIT = "/usr/bin/git"
+# Clear LD_PRELOAD so child git processes do not inherit the Electron shim.
 os.environ.pop("LD_PRELOAD", None)
 
 
 def _natural_key(tag_name: str) -> tuple[int | str, ...]:
-    """Splits a tag name into numeric and string segments for sorting."""
+    """Tokenizes numeric segments as integers for natural version sorting."""
     parts = re.split(r"(\d+)", tag_name)
     return tuple(int(p) if p.isdigit() else p for p in parts)
 
 
+def _parse_yaml_with_pyyaml(raw_text: str) -> dict[str, int] | None:
+    """Parses `tags.keep_recent_by_pattern` using PyYAML when available."""
+    if yaml is None:
+        return None
+    try:
+        data = yaml.safe_load(raw_text) or {}
+        windows = data.get("tags", {}).get("keep_recent_by_pattern")
+        if isinstance(windows, dict):
+            return {str(k): int(v) for k, v in windows.items()}
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def _parse_keep_recent_kv(stripped: str) -> tuple[str, int] | None:
+    """Parses a `pattern: count` line inside `keep_recent_by_pattern:`."""
+    if ":" not in stripped:
+        return None
+    key_raw, val_raw = stripped.split(":", 1)
+    key = key_raw.strip().strip("'\"")
+    val_str = val_raw.split("#", 1)[0].strip()
+    if key and val_str.lstrip("-").isdigit():
+        return key, int(val_str)
+    return None
+
+
 def _parse_simple_keep_recent_yaml(raw_text: str) -> dict[str, int] | None:
-    """Parses keep_recent_by_pattern via PyYAML or a stdlib line fallback."""
-    if yaml is not None:
-        try:
-            data = yaml.safe_load(raw_text) or {}
-            tags_sec = data.get("tags", {})
-            windows = tags_sec.get("keep_recent_by_pattern")
-            if isinstance(windows, dict):
-                return {str(k): int(v) for k, v in windows.items()}
-        except (ValueError, TypeError, AttributeError):
-            pass
+    """Parses `tags.keep_recent_by_pattern` with a stdlib fallback."""
+    pyyaml_result = _parse_yaml_with_pyyaml(raw_text)
+    if pyyaml_result is not None:
+        return pyyaml_result
 
     parsed: dict[str, int] = {}
     in_keep_block = False
@@ -43,22 +68,20 @@ def _parse_simple_keep_recent_yaml(raw_text: str) -> dict[str, int] | None:
         if stripped.startswith("keep_recent_by_pattern:"):
             in_keep_block = True
             continue
-        if in_keep_block:
-            if not line.startswith((" ", "\t")) or (
-                stripped.endswith(":") and ":" not in stripped[:-1]
-            ):
-                break
-            if ":" in stripped:
-                key_raw, val_raw = stripped.split(":", 1)
-                key = key_raw.strip().strip("'\"")
-                val_str = val_raw.split("#", 1)[0].strip()
-                if key and val_str.lstrip("-").isdigit():
-                    parsed[key] = int(val_str)
-    return parsed if parsed else None
+        if not in_keep_block:
+            continue
+        if not line.startswith((" ", "\t")) or (
+            stripped.endswith(":") and ":" not in stripped[:-1]
+        ):
+            break
+        kv = _parse_keep_recent_kv(stripped)
+        if kv is not None:
+            parsed[kv[0]] = kv[1]
+    return parsed or None
 
 
 def _load_rolling_windows() -> dict[str, int]:
-    """Loads configured tag retention windows from repo or user config.yaml."""
+    """Loads tag retention windows from repo or user `config.yaml`."""
     default_windows = {"candidate/*": 5, "release/*": 5, "platform/*": 5}
     res = subprocess.run(
         [REAL_GIT, "rev-parse", "--git-common-dir"],
@@ -85,8 +108,8 @@ def _load_rolling_windows() -> dict[str, int]:
     return default_windows
 
 
-def _local_tag_rank_map() -> dict[str, int]:
-    """Returns a rank map of locally existing tags ordered by creatordate."""
+def _get_local_tag_ranks() -> dict[str, int]:
+    """Ranks locally present tags newest-first by `-creatordate`."""
     res = subprocess.run(
         [
             REAL_GIT,
@@ -114,7 +137,7 @@ def _compute_kept_by_prefix(
     windows: dict[str, int],
     local_ranks: dict[str, int],
 ) -> dict[str, set[str]]:
-    """Computes retained tag sets per pattern using local and natural sort."""
+    """Selects the top `limit` tags per pattern (local rank, then natural)."""
     prefix_tags: dict[str, set[str]] = {p: set() for p in windows}
     for _, tag_name, matched_prefix in entries:
         if matched_prefix and tag_name:
@@ -137,7 +160,7 @@ def _compute_kept_by_prefix(
 
 
 def _filter_ls_remote_tags(raw_stdout: str) -> str:
-    """Filters git ls-remote --tags output to configured rolling windows."""
+    """Filters `git ls-remote --tags` output, pairing `^{}` peeled refs."""
     windows = _load_rolling_windows()
     entries: list[tuple[str, str, str]] = []
     for line in raw_stdout.splitlines():
@@ -154,7 +177,7 @@ def _filter_ls_remote_tags(raw_stdout: str) -> str:
         entries.append((line, tag_name, matched_prefix))
 
     kept_by_prefix = _compute_kept_by_prefix(
-        entries, windows, _local_tag_rank_map()
+        entries, windows, _get_local_tag_ranks()
     )
     out_lines = [
         line
@@ -166,7 +189,7 @@ def _filter_ls_remote_tags(raw_stdout: str) -> str:
 
 
 def _rewrite_fetch_args(args: list[str]) -> list[str]:
-    """Ensures GitKraken `git fetch` invocations use `--no-tags`."""
+    """Strips `--tags`/`-t` and injects `--no-tags` on `git fetch` calls."""
     if "fetch" not in args:
         return args
     cleaned = [a for a in args if a not in ("--tags", "-t")]
@@ -177,7 +200,7 @@ def _rewrite_fetch_args(args: list[str]) -> list[str]:
 
 
 def main() -> None:
-    """Entrypoint for the GitKraken selectedGitPath wrapper."""
+    """Intercepts `ls-remote --tags` and `fetch`, passing others via execv."""
     args = sys.argv[1:]
     if "ls-remote" in args and ("--tags" in args or "-t" in args):
         proc = subprocess.run(

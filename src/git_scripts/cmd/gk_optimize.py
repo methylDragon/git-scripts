@@ -6,39 +6,51 @@ import json
 import subprocess
 from pathlib import Path
 
-from git_scripts.gk.optimize.config import (
-    get_default_user_config_path,
+from git_scripts.gk.optimize.config_loader import (
     get_repo_config_path,
-    read_optimizer_config,
-    write_optimizer_config,
+    get_user_config_path,
+    read_config,
+    write_config,
+)
+from git_scripts.gk.optimize.gitkraken_launcher import (
+    register_watched_repo,
+    unregister_watched_repo,
+    write_git_wrapper,
+    write_gitkraken_launcher,
 )
 from git_scripts.gk.optimize.models import (
     GkExpectMode,
     GkOptimizeResult,
     GkVerifyResult,
 )
-from git_scripts.gk.optimize.shim import (
-    build_and_install_shim_so,
-    unregister_watched_repo,
-    write_gitkraken_git_wrapper,
-    write_gitkraken_launcher_and_desktop,
-)
-from git_scripts.gk.optimize.state import (
-    apply_gitkraken_profile_and_repo_settings,
-    apply_negative_fetch_refspecs,
+from git_scripts.gk.optimize.shim_builder import build_shim
+from git_scripts.gk.optimize.state_manager import (
+    apply_fetch_refspecs,
+    apply_gk_settings,
     get_state_path,
     read_state,
-    revert_gitkraken_profile_and_repo_settings_cas,
-    revert_negative_fetch_refspecs_cas,
+    revert_fetch_refspecs,
+    revert_gk_settings,
     write_state,
 )
-from git_scripts.gk.optimize.tags import (
-    analyze_tags_to_prune,
-    apply_tag_pruning,
-    restore_pruned_tags_cas,
+from git_scripts.gk.optimize.tag_pruner import (
+    analyze_prunable_tags,
+    prune_tags,
+    revert_tags,
 )
-from git_scripts.gk.optimize.watcher import record_tag_prune_marker
+from git_scripts.gk.optimize.worktree_watcher import (
+    execute_watch_daemon,
+    record_prune_marker,
+)
 from git_scripts.ui import UI
+
+__all__ = [
+    "GkExpectMode",
+    "execute_gk_install",
+    "execute_gk_uninstall",
+    "execute_gk_verify",
+    "execute_watch_daemon",
+]
 
 
 def resolve_repo_and_common_git_dir(
@@ -101,15 +113,24 @@ def execute_gk_install(
     user_cfg_file = (
         config_path
         if config_path is not None
-        else get_default_user_config_path(base_home)
+        else get_user_config_path(base_home)
     )
-    config = read_optimizer_config(user_cfg_file, keep_recent_override)
-    write_optimizer_config(config, get_default_user_config_path(base_home))
-    write_optimizer_config(config, get_repo_config_path(common_git_dir))
+    config = read_config(user_cfg_file, keep_recent_override)
+    write_config(
+        config,
+        get_user_config_path(base_home),
+        source_path=user_cfg_file,
+    )
+    write_config(
+        config,
+        get_repo_config_path(common_git_dir),
+        source_path=user_cfg_file,
+    )
 
-    shim_so = build_and_install_shim_so(opt_home_dir)
-    gk_git = write_gitkraken_git_wrapper(opt_home_dir)
-    _, desktop_path = write_gitkraken_launcher_and_desktop(
+    shim_so = build_shim(opt_home_dir)
+    gk_git = write_git_wrapper(opt_home_dir)
+    register_watched_repo(opt_home_dir, common_git_dir)
+    _, desktop_path = write_gitkraken_launcher(
         dest_dir=opt_home_dir,
         common_git_dir=common_git_dir,
         ignored_dirs=config.watcher.ignored_dirs,
@@ -117,16 +138,16 @@ def execute_gk_install(
     )
 
     state = read_state(common_git_dir)
-    apply_negative_fetch_refspecs(
+    apply_fetch_refspecs(
         common_git_dir, config.tags.blocked_fetch_patterns, state
     )
 
-    to_prune, kept = analyze_tags_to_prune(common_git_dir, config)
+    to_prune, kept = analyze_prunable_tags(common_git_dir, config)
     backup_refs = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
-    pruned_count = apply_tag_pruning(common_git_dir, to_prune, backup_refs)
-    record_tag_prune_marker(common_git_dir)
+    pruned_count = prune_tags(common_git_dir, to_prune, backup_refs)
+    record_prune_marker(common_git_dir)
 
-    cleaned_rs = apply_gitkraken_profile_and_repo_settings(
+    cleaned_rs = apply_gk_settings(
         gk_root=effective_gk_root,
         gitkraken_git_path=gk_git,
         kept_tags=set(kept),
@@ -136,8 +157,8 @@ def execute_gk_install(
 
     details = [
         (
-            "Built & installed NSFW (Node Sentinel File Watcher)"
-            f" symlink filter: {shim_so}"
+            "Built & installed preload runtime shim"
+            f" (NSFW & UI patcher): {shim_so}"
         ),
         f"Installed desktop launcher override: {desktop_path}",
         (
@@ -186,17 +207,17 @@ def execute_gk_uninstall(
             common_git_dir=str(common_git_dir),
             pruned_tags_count=0,
             kept_tags_count=0,
-            shim_so_path=str(opt_home_dir / "libgk_nsfw_nofollow.so"),
+            shim_so_path=str(opt_home_dir / "libgk_preload_shim.so"),
             desktop_entry_path=str(desktop_path),
             details=[msg],
         )
 
     state = read_state(common_git_dir)
-    revert_negative_fetch_refspecs_cas(common_git_dir, state)
-    revert_gitkraken_profile_and_repo_settings_cas(state)
+    revert_fetch_refspecs(common_git_dir, state)
+    revert_gk_settings(state)
 
     backup_refs = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
-    restored_count = restore_pruned_tags_cas(common_git_dir, backup_refs)
+    restored_count = revert_tags(common_git_dir, backup_refs)
 
     no_repos_left = unregister_watched_repo(opt_home_dir, common_git_dir)
     if no_repos_left and desktop_path.is_file():
@@ -208,7 +229,7 @@ def execute_gk_uninstall(
         common_git_dir / "gk-optimizer" / "last_tag_prune.json",
         get_repo_config_path(common_git_dir),
     ):
-        if artifact.is_file():
+        if artifact.is_symlink() or artifact.is_file():
             artifact.unlink()
 
     details = [
@@ -228,7 +249,7 @@ def execute_gk_uninstall(
         common_git_dir=str(common_git_dir),
         pruned_tags_count=0,
         kept_tags_count=restored_count,
-        shim_so_path=str(opt_home_dir / "libgk_nsfw_nofollow.so"),
+        shim_so_path=str(opt_home_dir / "libgk_preload_shim.so"),
         desktop_entry_path=str(desktop_path),
         details=details,
     )
@@ -250,17 +271,17 @@ def execute_gk_verify(
     desktop_path = base_home / apps_rel
 
     _, common_git_dir = resolve_repo_and_common_git_dir(repo_path)
-    shim_so = opt_home_dir / "libgk_nsfw_nofollow.so"
+    shim_so = opt_home_dir / "libgk_preload_shim.so"
     gk_git = opt_home_dir / "gitkraken-git"
     state_file = get_state_path(common_git_dir)
 
     cfg_file = get_repo_config_path(common_git_dir)
-    config = read_optimizer_config(cfg_file if cfg_file.is_file() else None)
-    to_prune, _ = analyze_tags_to_prune(common_git_dir, config)
+    config = read_config(cfg_file if cfg_file.is_file() else None)
+    to_prune, _ = analyze_prunable_tags(common_git_dir, config)
 
     checks: dict[str, bool] = {}
     if expect == GkExpectMode.INSTALLED:
-        checks["shim_so_built (libgk_nsfw_nofollow.so)"] = shim_so.is_file()
+        checks["shim_so_built (libgk_preload_shim.so)"] = shim_so.is_file()
         checks["gitkraken_git_executable"] = gk_git.is_file()
         dt_ok = desktop_path.is_file()
         dt_text = desktop_path.read_text(encoding="utf-8") if dt_ok else ""

@@ -1,4 +1,4 @@
-# Architectural & Domain Style Guidelines
+# Architectural and Domain Style Guidelines
 
 This document captures the higher-level design philosophy and domain semantics for `git-scripts`. For syntax, formatting, and linting rules, refer to our `ruff` configurations and `pixi` definitions.
 
@@ -8,7 +8,7 @@ This document captures the higher-level design philosophy and domain semantics f
 - **Pydantic:** Pydantic `BaseModel` is permitted and recommended for parsing, mapping, and validating external API payloads (such as GitHub API JSON responses) where automatic field aliasing and runtime schema validation are beneficial.
 - **Enums:** We prefer explicit Python `Enum` classes over string literals or `Literal` types for routing application logic (e.g., `RebaseAction`).
 
-## 2. Domain Naming & Side Effects
+## 2. Domain Naming and Side Effects
 
 To maintain a unified and easily understandable domain language across the toolset, we adhere to the following rules for naming models and state objects:
 

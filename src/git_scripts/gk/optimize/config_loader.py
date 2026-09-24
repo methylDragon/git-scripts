@@ -1,6 +1,5 @@
-"""YAML configuration loader and writer for git-gk-optimize."""
+"""YAML configuration loader and symlink installer for git-gk-optimize."""
 
-import shutil
 from pathlib import Path
 
 import yaml
@@ -8,12 +7,12 @@ import yaml
 from git_scripts.gk.optimize.models import GkOptimizerConfig
 
 
-def get_bundled_default_config_path() -> Path:
+def get_default_config_path() -> Path:
     """Returns the repository-bundled default config.yaml path."""
     return Path(__file__).resolve().parent / "config.yaml"
 
 
-def get_default_user_config_path(home_dir: Path | None = None) -> Path:
+def get_user_config_path(home_dir: Path | None = None) -> Path:
     """Returns ~/.config/gitkraken-optimizer/config.yaml."""
     base = home_dir if home_dir is not None else Path.home()
     return base / ".config" / "gitkraken-optimizer" / "config.yaml"
@@ -24,7 +23,7 @@ def get_repo_config_path(common_git_dir: Path) -> Path:
     return common_git_dir / "gk-optimizer" / "config.yaml"
 
 
-def read_optimizer_config(
+def read_config(
     config_path: Path | None = None,
     keep_recent_override: int | None = None,
 ) -> GkOptimizerConfig:
@@ -32,7 +31,7 @@ def read_optimizer_config(
     effective_path = (
         config_path
         if (config_path is not None and config_path.is_file())
-        else get_bundled_default_config_path()
+        else get_default_config_path()
     )
     if effective_path.is_file():
         raw = yaml.safe_load(effective_path.read_text(encoding="utf-8")) or {}
@@ -54,13 +53,34 @@ def read_optimizer_config(
     return config
 
 
-def write_optimizer_config(config: GkOptimizerConfig, dest_path: Path) -> None:
-    """Writes the validated configuration to disk as formatted YAML."""
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    bundled = get_bundled_default_config_path()
-    if bundled.is_file() and config == GkOptimizerConfig():
-        shutil.copy2(bundled, dest_path)
+def _replace_with_symlink(target: Path, dest_path: Path) -> None:
+    """Replaces `dest_path` with a symlink to `target.resolve()`."""
+    resolved_target = target.resolve()
+    if dest_path.is_symlink() and dest_path.resolve() == resolved_target:
         return
+    if dest_path.is_symlink() or dest_path.exists():
+        dest_path.unlink()
+    dest_path.symlink_to(resolved_target)
+
+
+def write_config(
+    config: GkOptimizerConfig,
+    dest_path: Path,
+    source_path: Path | None = None,
+) -> None:
+    """Symlinks `dest_path` to `config.yaml`, or writes YAML if overridden."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    bundled = get_default_config_path()
+    candidate = (
+        source_path
+        if (source_path is not None and source_path.is_file())
+        else bundled
+    )
+    if candidate.is_file() and read_config(candidate) == config:
+        _replace_with_symlink(candidate, dest_path)
+        return
+    if dest_path.is_symlink():
+        dest_path.unlink()
     payload = config.model_dump(mode="json")
     header = (
         "# git-gk-optimize configuration\n"

@@ -20,8 +20,10 @@ tags:
     - "release/20*"
 
 watcher:
-  # Directory names hidden from GitKraken's NSFW (Node Sentinel File Watcher,
-  # @axosoft/nsfw) inotify directory crawler.
+  # Real directory names hidden from GitKraken's NSFW (@axosoft/nsfw) inotify
+  # crawler. (Working-tree symlinks such as bazel-* are already skipped
+  # globally via lstat64 while symlinked .git roots and parent-dir symlink
+  # changes remain tracked.)
   ignored_dirs:
     - "node_modules"
     - ".venv"

@@ -1,4 +1,4 @@
-"""Watcher for worktree IN_MOVE_SELF refresh and rolling tag window pruning."""
+"""Worktree watcher for IN_MOVE_SELF refresh and rolling tag window pruning."""
 
 import json
 import os
@@ -7,13 +7,13 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout  # pylint: disable=import-error
 
-from git_scripts.gk.optimize.config import (
+from git_scripts.gk.optimize.config_loader import (
     get_repo_config_path,
-    read_optimizer_config,
+    read_config,
 )
-from git_scripts.gk.optimize.tags import (
-    analyze_tags_to_prune,
-    apply_tag_pruning,
+from git_scripts.gk.optimize.tag_pruner import (
+    analyze_prunable_tags,
+    prune_tags,
 )
 
 
@@ -58,6 +58,26 @@ def nudge_worktree_nsfw(wt_gitdir: Path) -> bool:
         return False
 
 
+def _recover_nudge_dirs(worktrees_dir: Path) -> None:
+    """Restores any interrupted `.{name}.gk-nudge` directories in worktrees."""
+    if not worktrees_dir.is_dir():
+        return
+    for wt_dir in sorted(worktrees_dir.iterdir()):
+        if not (
+            wt_dir.is_dir()
+            and wt_dir.name.startswith(".")
+            and wt_dir.name.endswith(".gk-nudge")
+        ):
+            continue
+        orig_dir = wt_dir.parent / wt_dir.name[1 : -len(".gk-nudge")]
+        if orig_dir.exists():
+            continue
+        try:
+            os.rename(wt_dir, orig_dir)
+        except OSError:
+            pass
+
+
 def _lookup_packed_ref_sha(common_git_dir: Path, ref_rel: str) -> str:
     """Finds the target SHA for ref_rel inside packed-refs if present."""
     packed = common_git_dir / "packed-refs"
@@ -87,12 +107,14 @@ def _resolve_worktree_head_signature(
         ref_rel = head_raw[5:].strip()
         loose_ref = common_git_dir / ref_rel
         try:
-            if loose_ref.is_file():
-                resolved_sha = loose_ref.read_text(encoding="utf-8").strip()
-            else:
-                packed_sha = _lookup_packed_ref_sha(common_git_dir, ref_rel)
-                if packed_sha:
-                    resolved_sha = packed_sha
+            resolved_sha = (
+                loose_ref.read_text(encoding="utf-8").strip()
+                if loose_ref.is_file()
+                else (
+                    _lookup_packed_ref_sha(common_git_dir, ref_rel)
+                    or resolved_sha
+                )
+            )
         except OSError:
             pass
     orig_head = ""
@@ -112,29 +134,7 @@ def _snapshot_worktree_heads(common_git_dir: Path) -> dict[str, str]:
         return {}
     state: dict[str, str] = {}
     for wt_dir in sorted(worktrees_dir.iterdir()):
-        if not wt_dir.is_dir():
-            continue
-        if wt_dir.name.endswith(".nsfw_tmp"):
-            orig_dir = wt_dir.parent / wt_dir.name[: -len(".nsfw_tmp")]
-            if not orig_dir.exists():
-                try:
-                    os.rename(wt_dir, orig_dir)
-                    wt_dir = orig_dir
-                except OSError:
-                    continue
-            else:
-                continue
-        if wt_dir.name.startswith(".") and wt_dir.name.endswith(".gk-nudge"):
-            orig_dir = wt_dir.parent / wt_dir.name[1 : -len(".gk-nudge")]
-            if not orig_dir.exists():
-                try:
-                    os.rename(wt_dir, orig_dir)
-                    wt_dir = orig_dir
-                except OSError:
-                    continue
-            else:
-                continue
-        if wt_dir.name.startswith("."):
+        if not wt_dir.is_dir() or wt_dir.name.startswith("."):
             continue
         sig = _resolve_worktree_head_signature(common_git_dir, wt_dir)
         if sig:
@@ -165,7 +165,7 @@ def _snapshot_tag_state(common_git_dir: Path) -> float:
 PACKED_REFS_FLOOD_BYTES = 8192
 
 
-def _packed_refs_size(common_git_dir: Path) -> int:
+def _get_packed_refs_size(common_git_dir: Path) -> int:
     """Returns the size in bytes of packed-refs, or 0 if absent."""
     packed = common_git_dir / "packed-refs"
     try:
@@ -174,7 +174,7 @@ def _packed_refs_size(common_git_dir: Path) -> int:
         return 0
 
 
-def record_tag_prune_marker(
+def record_prune_marker(
     common_git_dir: Path,
     now_epoch: float | None = None,
 ) -> Path:
@@ -184,7 +184,7 @@ def record_tag_prune_marker(
     epoch = now_epoch if now_epoch is not None else time.time()
     payload = {
         "last_prune_epoch": epoch,
-        "packed_refs_size": _packed_refs_size(common_git_dir),
+        "packed_refs_size": _get_packed_refs_size(common_git_dir),
     }
     marker.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -193,7 +193,7 @@ def record_tag_prune_marker(
     return marker
 
 
-def should_run_tag_trim_pass(
+def should_prune_tags(
     common_git_dir: Path,
     now_epoch: float | None = None,
 ) -> bool:
@@ -208,29 +208,30 @@ def should_run_tag_trim_pass(
     except (OSError, ValueError, TypeError, AttributeError):
         return True
 
-    if _packed_refs_size(common_git_dir) - last_size > PACKED_REFS_FLOOD_BYTES:
+    if (
+        _get_packed_refs_size(common_git_dir) - last_size
+        > PACKED_REFS_FLOOD_BYTES
+    ):
         return True
 
     cfg_path = get_repo_config_path(common_git_dir)
-    config = read_optimizer_config(cfg_path if cfg_path.is_file() else None)
+    config = read_config(cfg_path if cfg_path.is_file() else None)
     interval_sec = max(0.0, float(config.tags.prune_interval_hours)) * 3600.0
     now = now_epoch if now_epoch is not None else time.time()
     return (now - last_epoch) >= interval_sec
 
 
-def run_idempotent_tag_trim_pass(common_git_dir: Path) -> int:
-    """Trims (N+1)th+ tags if any prefix exceeds its rolling window."""
+def prune_excess_tags(common_git_dir: Path) -> int:
+    """Prunes (N+1)th+ tags if any prefix exceeds its rolling window."""
     cfg_path = get_repo_config_path(common_git_dir)
-    config = read_optimizer_config(cfg_path if cfg_path.is_file() else None)
-    to_prune, _ = analyze_tags_to_prune(common_git_dir, config)
+    config = read_config(cfg_path if cfg_path.is_file() else None)
+    to_prune, _ = analyze_prunable_tags(common_git_dir, config)
     if not to_prune:
-        record_tag_prune_marker(common_git_dir)
+        record_prune_marker(common_git_dir)
         return 0
     backup_file = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
-    pruned = apply_tag_pruning(
-        common_git_dir, to_prune, backup_file=backup_file
-    )
-    record_tag_prune_marker(common_git_dir)
+    pruned = prune_tags(common_git_dir, to_prune, backup_file=backup_file)
+    record_prune_marker(common_git_dir)
     return pruned
 
 
@@ -240,16 +241,18 @@ def _load_watched_git_dirs(primary_git_dir: Path) -> list[Path]:
     repos_file = (
         Path.home() / ".config" / "gitkraken-optimizer" / "watched_repos.json"
     )
-    if repos_file.is_file():
-        try:
-            data = json.loads(repos_file.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("repos"), list):
-                for raw in data["repos"]:
-                    candidate = Path(str(raw)).resolve()
-                    if candidate.is_dir() and candidate not in dirs:
-                        dirs.append(candidate)
-        except (OSError, ValueError, TypeError):
-            pass
+    if not repos_file.is_file():
+        return dirs
+    try:
+        data = json.loads(repos_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return dirs
+    if not isinstance(data, dict) or not isinstance(data.get("repos"), list):
+        return dirs
+    for raw in data["repos"]:
+        candidate = Path(str(raw)).resolve()
+        if candidate.is_dir() and candidate not in dirs:
+            dirs.append(candidate)
     return dirs
 
 
@@ -258,8 +261,9 @@ def _poll_single_repo(
     prev_wt_by_repo: dict[Path, dict[str, str]],
     prev_tag_by_repo: dict[Path, float],
 ) -> None:
-    """Checks worktree HEAD changes and lazy tag trim conditions."""
+    """Checks worktree HEAD changes and lazy tag prune conditions."""
     prev_wt = prev_wt_by_repo.get(git_dir, {})
+    _recover_nudge_dirs(git_dir / "worktrees")
     cur_wt = _snapshot_worktree_heads(git_dir)
     for wt_name, head_sig in cur_wt.items():
         if wt_name in prev_wt and head_sig != prev_wt[wt_name]:
@@ -270,8 +274,8 @@ def _poll_single_repo(
     cur_tag_mtime = _snapshot_tag_state(git_dir)
     if cur_tag_mtime > prev_tag_by_repo.get(
         git_dir, 0.0
-    ) and should_run_tag_trim_pass(git_dir):
-        run_idempotent_tag_trim_pass(git_dir)
+    ) and should_prune_tags(git_dir):
+        prune_excess_tags(git_dir)
         prev_tag_by_repo[git_dir] = _snapshot_tag_state(git_dir)
 
 
@@ -291,8 +295,9 @@ def execute_watch_daemon(
         with lock:
             git_dirs = _load_watched_git_dirs(common_git_dir)
             for d in git_dirs:
-                if should_run_tag_trim_pass(d):
-                    run_idempotent_tag_trim_pass(d)
+                _recover_nudge_dirs(d / "worktrees")
+                if should_prune_tags(d):
+                    prune_excess_tags(d)
             prev_wt = {d: _snapshot_worktree_heads(d) for d in git_dirs}
             prev_tag = {d: _snapshot_tag_state(d) for d in git_dirs}
             iterations = 0
@@ -301,6 +306,7 @@ def execute_watch_daemon(
                 time.sleep(poll_interval_sec)
                 for git_dir in _load_watched_git_dirs(common_git_dir):
                     if git_dir not in prev_wt:
+                        _recover_nudge_dirs(git_dir / "worktrees")
                         prev_wt[git_dir] = _snapshot_worktree_heads(git_dir)
                         prev_tag[git_dir] = _snapshot_tag_state(git_dir)
                     _poll_single_repo(git_dir, prev_wt, prev_tag)

@@ -21,7 +21,6 @@ def read_state(common_git_dir: Path) -> dict[str, Any]:
         if isinstance(loaded, dict):
             return loaded
     return {
-        "git_config": {},
         "fetch_refspecs": {},
         "gk_profiles": {},
         "gk_repo_settings": {},
@@ -67,7 +66,7 @@ def _normalize_negative_tag_refspec(pattern: str) -> str:
     return f"^{clean}"
 
 
-def apply_negative_fetch_refspecs(
+def apply_fetch_refspecs(
     common_git_dir: Path,
     exclude_globs: list[str],
     state: dict[str, Any],
@@ -100,7 +99,7 @@ def apply_negative_fetch_refspecs(
             )
 
 
-def revert_negative_fetch_refspecs_cas(
+def revert_fetch_refspecs(
     common_git_dir: Path,
     state: dict[str, Any],
 ) -> None:
@@ -161,7 +160,7 @@ def _trim_repo_settings_file(
     return True
 
 
-def apply_gitkraken_profile_and_repo_settings(
+def apply_gk_settings(
     gk_root: Path,
     gitkraken_git_path: Path,
     kept_tags: set[str],
@@ -221,7 +220,7 @@ def _restore_repo_settings_entry(
         rs_file.write_text(json.dumps(rs_data), encoding="utf-8")
 
 
-def revert_gitkraken_profile_and_repo_settings_cas(
+def revert_gk_settings(
     state: dict[str, Any],
 ) -> None:
     """Reverts selectedGitPath and repoSettings tags using strict CAS."""

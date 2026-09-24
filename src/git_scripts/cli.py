@@ -12,9 +12,11 @@ from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
     execute_align_pr_bases_and_sync_stacks,
 )
 from git_scripts.cmd.gk_optimize import (
+    GkExpectMode,
     execute_gk_install,
     execute_gk_uninstall,
     execute_gk_verify,
+    execute_watch_daemon,
 )
 from git_scripts.cmd.prune_local import execute_prune_local
 from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
@@ -22,8 +24,6 @@ from git_scripts.cmd.push_prefix import execute_push_prefix
 from git_scripts.cmd.push_stack import execute_push_stack
 from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
 from git_scripts.cmd.rebase_stack import execute_rebase_stack
-from git_scripts.gk.optimize.models import GkExpectMode
-from git_scripts.gk.optimize.watcher import execute_watch_daemon
 from git_scripts.ui import UI
 
 app = typer.Typer(help="Git Stack Utilities", add_completion=False)

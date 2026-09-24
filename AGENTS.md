@@ -2,7 +2,7 @@
 
 This file is specifically for AI agents (like Roo, Claude, etc.) operating in this repository to prevent hallucinations, setup failures, and regressions of critical safety features.
 
-## 1. Environment & Tooling
+## 1. Environment and Tooling
 
 - **Package Manager:** This repository uses `pixi` for dependency and environment management.
   - **DO NOT** use `pip install` or create generic virtual environments.
@@ -13,7 +13,7 @@ This file is specifically for AI agents (like Roo, Claude, etc.) operating in th
 ## 2. Writing Code
 
 - **Shared Guidelines:** Before proposing architectural changes or adding new data structures, you MUST read `STYLE.md` to understand our exact naming conventions (e.g., when to use `Result` vs `State`), type hinting rules, and model preferences (Dataclasses vs Pydantic).
-- **Linting & Complexity:** DO NOT add `noqa` comments to bypass line length or complexity rules (e.g., `E501` or `C901`). You must instead refactor the code to comply with the rules.
+- **Linting and Complexity:** DO NOT add `noqa` comments to bypass line length or complexity rules (e.g., `E501` or `C901`). You must instead refactor the code to comply with the rules.
 
 ## 3. Critical Safety Guardrails
 

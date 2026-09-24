@@ -35,7 +35,7 @@ def _list_repo_tags_sorted(common_git_dir: Path) -> list[tuple[str, str]]:
     return tags
 
 
-def analyze_tags_to_prune(
+def analyze_prunable_tags(
     common_git_dir: Path,
     config: GkOptimizerConfig,
 ) -> tuple[list[tuple[str, str]], list[str]]:
@@ -70,7 +70,7 @@ def analyze_tags_to_prune(
     return to_prune, kept
 
 
-def record_pruned_refs_backup(
+def backup_pruned_refs(
     backup_file: Path,
     pruned_tags: list[tuple[str, str]],
 ) -> None:
@@ -93,7 +93,7 @@ def record_pruned_refs_backup(
     )
 
 
-def apply_tag_pruning(
+def prune_tags(
     common_git_dir: Path,
     tags_to_prune: list[tuple[str, str]],
     backup_file: Path | None = None,
@@ -103,7 +103,7 @@ def apply_tag_pruning(
         return 0
 
     if backup_file is not None:
-        record_pruned_refs_backup(backup_file, tags_to_prune)
+        backup_pruned_refs(backup_file, tags_to_prune)
 
     stdin_lines = [
         f"delete refs/tags/{tag_name} {sha}" for tag_name, sha in tags_to_prune
@@ -131,7 +131,7 @@ def apply_tag_pruning(
     return len(tags_to_prune)
 
 
-def restore_pruned_tags_cas(
+def revert_tags(
     common_git_dir: Path,
     backup_file: Path,
 ) -> int:
