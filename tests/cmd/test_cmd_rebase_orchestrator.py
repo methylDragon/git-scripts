@@ -8,7 +8,7 @@ from git_scripts.models import RebaseStatus, ScriptAbortError
 
 class TestCmdRebaseOrchestrator(absltest.TestCase):
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
-    def test_handle_interactive_conflict_abort_script(
+    def test_handle_interactive_conflict_raises_abort_on_exit_without_rollback(
         self, mock_rebase_continue
     ):
         mock_ui = MagicMock()
@@ -24,7 +24,9 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         )
 
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
-    def test_handle_interactive_conflict_abort_rebase(self, mock_rebase_abort):
+    def test_handle_interactive_conflict_aborts_rebase_when_user_rolls_back(
+        self, mock_rebase_abort
+    ):
         mock_ui = MagicMock()
         mock_ui.ask_choice.return_value = "Rollback stack and skip to next"
 
@@ -36,7 +38,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         mock_rebase_abort.assert_called_once_with(".")
 
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
-    def test_handle_interactive_conflict_resolve_success(
+    def test_handle_interactive_conflict_continues_after_manual_resolution(
         self, mock_rebase_continue
     ):
         mock_ui = MagicMock()
@@ -53,7 +55,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
     @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
-    def test_handle_interactive_conflict_resolve_accidentally_continued(
+    def test_handle_interactive_conflict_succeeds_if_continued_externally(
         self, mock_rebase_continue, mock_is_worktree_busy, mock_rebase_abort
     ):
         mock_ui = MagicMock()
@@ -77,7 +79,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
     @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
-    def test_handle_interactive_conflict_resolve_accidentally_aborted(
+    def test_handle_interactive_conflict_errors_if_aborted_externally(
         self, mock_rebase_continue, mock_is_worktree_busy, mock_rebase_abort
     ):
         mock_ui = MagicMock()
@@ -97,7 +99,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
 
     @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
-    def test_handle_interactive_conflict_loops_on_unresolved(
+    def test_handle_interactive_conflict_loops_until_conflicts_resolved(
         self, mock_rebase_continue, mock_is_worktree_busy
     ):
         mock_ui = MagicMock()

@@ -134,7 +134,7 @@ This repository uses `pytest` for unit testing the Python logic and `absltest` f
 
 ## Development
 
-If you'd like to contribute to this project, we enforce formatting (`ruff-format`) and linting (`ruff`) for Python files, as well as `markdownlint` and shell linting/formatting via `pre-commit`.
+If you'd like to contribute to this project, we enforce formatting (`ruff-format`) and linting (`ruff`) for Python files, as well as `markdownlint` and shell linting/formatting via `prek`.
 
 1. **Install dependencies and hooks:**
    Everything is managed via `pixi`. Remember to run `pixi install` if you cloned this repository.
@@ -149,5 +149,5 @@ If you'd like to contribute to this project, we enforce formatting (`ruff-format
    You can trigger formatting and linting across all files without committing by running:
 
    ```bash
-   pixi run pre-commit
+   pixi run lint
    ```

@@ -25,7 +25,9 @@ class TestCmdRebaseStack(absltest.TestCase):
         self.repo_helper.cleanup()
 
     @mock.patch("git_scripts.cmd.rebase_stack.push_branches")
-    def test_execute_rebase_stack_linear_chain(self, mock_push):
+    def test_execute_rebase_stack_rebases_chain_and_restores_branch(
+        self, mock_push
+    ):
         # Master template:
         # main
         # ├── test-chain-a
@@ -170,7 +172,7 @@ class TestCmdRebaseStack(absltest.TestCase):
             self.repo_helper.rev_parse("test-chain-d-e-f-j-k-l"), old_j_hash
         )
 
-    def test_execute_rebase_stack_detached_head(self):
+    def test_execute_rebase_stack_returns_false_when_head_is_detached(self):
         repo = pygit2.Repository(self.repo_helper.path)
         c = repo.revparse_single("main")
         repo.checkout_tree(c)
@@ -185,7 +187,9 @@ class TestCmdRebaseStack(absltest.TestCase):
         self.assertFalse(success)
         self.assertTrue(any("detached HEAD" in str(p) for p in ui.prints))
 
-    def test_execute_rebase_stack_on_target_branch(self):
+    def test_execute_rebase_stack_is_noop_when_on_target_branch(
+        self,
+    ):
         self.repo_helper.checkout("main")
         ui = MockUI()
         success = execute_rebase_stack(
@@ -201,7 +205,9 @@ class TestCmdRebaseStack(absltest.TestCase):
             )
         )
 
-    def test_execute_rebase_stack_no_branches_in_stack(self):
+    def test_execute_rebase_stack_returns_true_when_stack_has_no_branches(
+        self,
+    ):
         self.repo_helper.checkout("test-chain-a")
         with mock.patch(
             "git_scripts.cmd.rebase_stack._get_linear_stack",

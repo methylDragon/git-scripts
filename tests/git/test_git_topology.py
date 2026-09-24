@@ -51,7 +51,9 @@ class TestTopologyAnalyzer(absltest.TestCase):
         analyzer.analyze_obsolescence("main", progress_callback=mock_progress)
         self.assertGreaterEqual(mock_progress.call_count, 1)
 
-    def test_analyzer_get_sync_point(self):
+    def test_get_sync_point_returns_old_and_new_hashes_after_parent_rebases(
+        self,
+    ):
         """Tests that the analyzer finds sync points correctly."""
         self.repo_helper.checkout("main")
         self.repo_helper.checkout("A", create=True)
@@ -76,7 +78,9 @@ class TestTopologyAnalyzer(absltest.TestCase):
         self.assertIsNotNone(sync_point)
         self.assertEqual(sync_point, ("B", b_old, b_new))
 
-    def test_analyze_obsolescence(self):
+    def test_analyze_obsolescence_marks_merged_branch_obsolete(
+        self,
+    ):
         """Tests analyzing branch topology and obsolescence caching."""
         self.repo_helper.checkout("main")
         self.repo_helper.commit("init", "init.txt", "init")
@@ -96,7 +100,7 @@ class TestTopologyAnalyzer(absltest.TestCase):
         self.assertTrue(analysis.is_obsolete)
         self.assertIsNone(analysis.cut_point)
 
-    def test_find_linear_stack(self):
+    def test_find_linear_stack_collects_all_ancestors_up_to_root(self):
         """Tests finding a linear stack."""
         repo = MagicMock()
         with patch(
@@ -108,7 +112,7 @@ class TestTopologyAnalyzer(absltest.TestCase):
                 {"start", "b1", "b2"},
             )
 
-    def test_sort_branches_bottom_to_top(self):
+    def test_sort_branches_bottom_to_top_orders_parents_before_children(self):
         """Tests sorting branches."""
         parent_map: dict[str, str | None] = {
             "b1": "main",

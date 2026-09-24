@@ -156,7 +156,9 @@ class TestCmdPrune(absltest.TestCase):
         )
 
     @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
-    def test_execute_prune_remote_prefix_dry_run(self, mock_subprocess_run):
+    def test_execute_prune_remote_prefix_skips_deletion_in_dry_run_mode(
+        self, mock_subprocess_run
+    ):
         main_id = self.repo.revparse_single("main").id
         self.repo.references.create("refs/remotes/origin/main", main_id)
         self.repo.references.create("refs/remotes/origin/feat/1", main_id)
@@ -175,7 +177,7 @@ class TestCmdPrune(absltest.TestCase):
                 self.fail("git push called during dry run")
 
     @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
-    def test_execute_prune_remote_prefix_with_also_prune_no_local(
+    def test_execute_prune_remote_prefix_deletes_orphan_with_no_local_flag(
         self, mock_subprocess_run
     ):
         main_id = self.repo.revparse_single("main").id

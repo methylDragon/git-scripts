@@ -22,7 +22,7 @@ from git_scripts.gh.api import GhExecutionError, GitHubPr
 # --- FUNCTIONAL CORE TESTS ---
 
 
-def test_calculate_pr_actions():
+def test_calculate_pr_actions_repoints_child_pr_to_nearest_ancestor_with_pr():
     """Test the pure functional core of PR base alignment."""
     # Mock pygit2 repo and branches
     repo = MagicMock(spec=pygit2.Repository)
@@ -86,7 +86,7 @@ def test_calculate_pr_actions():
     assert edits[0].new_base == "A"
 
 
-def test_calculate_pr_actions_with_tree_topology():
+def test_calculate_pr_actions_aligns_forking_tree_branches_to_parent_pr():
     """Test the PR base alignment with a forking tree topology."""
     repo = MagicMock(spec=pygit2.Repository)
 
@@ -146,7 +146,7 @@ def test_calculate_pr_actions_with_tree_topology():
     assert actions_dict["E"] == "A"
 
 
-def test_calculate_pr_actions_with_create_missing():
+def test_calculate_pr_actions_targets_new_pr_when_create_missing_set():
     """Test the PR base alignment with create_missing=True."""
     repo = MagicMock(spec=pygit2.Repository)
 
@@ -204,7 +204,7 @@ def test_calculate_pr_actions_with_create_missing():
 # --- CLI INTEGRATION TESTS ---
 
 
-def test_execute_align_pr_bases_and_sync_stacks_not_installed():
+def test_execute_align_pr_bases_returns_false_when_gh_cli_is_not_installed():
     with patch(
         "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_installed",
         return_value=False,
@@ -220,7 +220,7 @@ def test_execute_align_pr_bases_and_sync_stacks_not_installed():
     "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_installed",
     return_value=True,
 )
-def test_execute_align_pr_bases_and_sync_stacks_no_branches(
+def test_execute_align_pr_bases_returns_true_when_no_branches_are_selected(
     mock_installed, mock_get_sel, mock_repo
 ):
     mock_get_sel.return_value = set()
@@ -235,14 +235,14 @@ def test_execute_align_pr_bases_and_sync_stacks_no_branches(
     "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_installed",
     return_value=True,
 )
-def test_execute_align_pr_bases_and_sync_stacks_cancel(
+def test_execute_align_pr_bases_returns_false_when_user_cancels_selection(
     mock_installed, mock_get_sel, mock_repo
 ):
     mock_get_sel.return_value = None
     assert not execute_align_pr_bases_and_sync_stacks(".", ui=MagicMock())
 
 
-def test_get_selected_branches():
+def test_get_selected_branches_returns_stack_when_current_stack_only():
     repo = MagicMock()
     repo.references = ["refs/heads/prefix-1", "refs/heads/other"]
     repo.head.shorthand = "prefix-1"
@@ -263,7 +263,7 @@ def test_get_selected_branches():
 
 
 @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
-def test_execute_align_pr_bases_and_sync_stacks_interactive(
+def test_execute_align_pr_bases_prompts_checkbox_selection_in_interactive_mode(
     mock_repo,
 ):
     ui = MagicMock()
@@ -302,7 +302,7 @@ def test_execute_align_pr_bases_and_sync_stacks_interactive(
                 assert "choices" in kwargs
 
 
-def test_group_into_stacks():
+def test_group_into_stacks_maps_each_stack_tip_to_ordered_branch_chain():
     repo = MagicMock()
 
     # Mock parent map: b1 -> main, b2 -> b1, c1 -> main
@@ -321,7 +321,7 @@ def test_group_into_stacks():
         assert stacks["c1"] == ["c1"]
 
 
-def test_print_branch_summary():
+def test_print_branch_summary_outputs_table_of_selected_branches_and_prs():
     ui = MagicMock()
     _print_branch_summary(
         {"b1", "b2"},
@@ -335,7 +335,7 @@ def test_print_branch_summary():
     ui.print.assert_called()
 
 
-def test_prompt_creates():
+def test_prompt_creates_returns_all_actions_when_auto_yes_is_enabled():
     ui = MagicMock()
     ui.auto_yes = True
     creates = [PrCreateAction("b1", "main", "T", "D")]
@@ -343,7 +343,7 @@ def test_prompt_creates():
     assert len(res) == 1
 
 
-def test_execute_edits():
+def test_execute_edits_updates_pr_bases_and_returns_false_on_gh_error():
     ui = MagicMock()
     edits = [PrEditAction("b1", "old", "new", "reason", "url")]
     with patch(
@@ -359,7 +359,7 @@ def test_execute_edits():
         assert not _execute_edits(edits, ".", ui)
 
 
-def test_execute_creates():
+def test_execute_creates_invokes_gh_pr_create_for_each_missing_pr():
     ui = MagicMock()
     creates = [PrCreateAction("b1", "main", "T", "D")]
     with patch(
@@ -369,7 +369,7 @@ def test_execute_creates():
         mock_create.assert_called_once()
 
 
-def test_print_final_summary():
+def test_print_final_summary_displays_edited_created_and_skipped_prs():
     ui = MagicMock()
     edits = [PrEditAction("b1", "old", "new", "reason", "url")]
     creates = [PrCreateAction("b1", "main", "T", "D")]
@@ -408,7 +408,7 @@ def test_print_final_summary():
     return_value=True,
 )
 @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
-def test_execute_align_pr_bases_and_sync_stacks_stack_link_success(
+def test_execute_align_pr_bases_links_stack_via_gh_stack_after_aligning_prs(
     mock_repo,
     mock_auth,
     mock_parity,
@@ -492,7 +492,7 @@ def test_execute_align_pr_bases_and_sync_stacks_stack_link_success(
     return_value=True,
 )
 @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
-def test_execute_align_pr_bases_and_sync_stacks_stack_link_fail(
+def test_execute_align_pr_bases_returns_false_when_gh_stack_link_fails(
     mock_repo,
     mock_auth,
     mock_parity,
@@ -565,7 +565,7 @@ def test_execute_align_pr_bases_and_sync_stacks_stack_link_fail(
     return_value=(True, ""),
 )
 @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
-def test_execute_align_pr_bases_and_sync_stacks_stack_link_not_installed(
+def test_execute_align_pr_bases_skips_linking_without_gh_stack(
     mock_repo, mock_parity, mock_cont, mock_anc, mock_link, mock_installed
 ):
     ui = MagicMock()

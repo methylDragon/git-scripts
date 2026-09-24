@@ -50,7 +50,7 @@ class TestCmdPushStack(absltest.TestCase):
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
     @mock.patch("git_scripts.cmd.push_stack.push_branches")
-    def test_execute_push_stack_with_push(
+    def test_execute_push_stack_pushes_all_diverged_branches_in_linear_stack(
         self, mock_push_branches, mock_run_cmd
     ):
         mock_push_branches.return_value = True
@@ -82,7 +82,7 @@ class TestCmdPushStack(absltest.TestCase):
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
     @mock.patch("git_scripts.cmd.push_stack.push_branches")
-    def test_execute_push_stack_fork_aborts(
+    def test_execute_push_stack_aborts_when_downstream_fork_is_detected(
         self, mock_push_branches, mock_run_cmd
     ):
         mock_push_branches.return_value = True
@@ -109,7 +109,7 @@ class TestCmdPushStack(absltest.TestCase):
         mock_push_branches.assert_not_called()
         assert any("Fork detected downstream" in str(p) for p in ui.prints)
 
-    def test_execute_push_stack_detached_head(self):
+    def test_execute_push_stack_returns_false_when_head_is_detached(self):
         # Detach head
         c = self.repo.revparse_single("main")
         self.repo.checkout_tree(c)
@@ -123,7 +123,9 @@ class TestCmdPushStack(absltest.TestCase):
         assert any("detached HEAD" in str(p) for p in ui.prints)
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    def test_execute_push_stack_no_branches(self, mock_run_cmd):
+    def test_execute_push_stack_returns_true_when_stack_has_no_branches(
+        self, mock_run_cmd
+    ):
         head_commit = typing.cast(pygit2.Commit, self.repo.head.peel())
         self.repo.create_branch("orphan", head_commit)
         self.repo_helper.checkout("orphan")
@@ -142,7 +144,7 @@ class TestCmdPushStack(absltest.TestCase):
 
     @mock.patch("git_scripts.cmd.push_stack.run_cmd")
     @mock.patch("git_scripts.cmd.push_stack.push_branches")
-    def test_execute_push_stack_up_to_date(
+    def test_execute_push_stack_skips_push_when_all_branches_are_up_to_date(
         self, mock_push_branches, mock_run_cmd
     ):
         self.repo_helper.checkout("feat/1", create=True)
