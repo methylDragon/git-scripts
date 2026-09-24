@@ -12,10 +12,7 @@ from git_scripts.git.reads import (
     get_stack_branches,
     is_obsolete,
 )
-from git_scripts.git.rebase import (
-    rebase_abort,
-    rebase_continue,
-)
+from git_scripts.git.rebase import rebase_abort, rebase_continue
 from git_scripts.git.rebase_plan import create_rebase_plan, execute_rebase_plan
 from git_scripts.git.topology import TopologyAnalyzer, sync_colocated_branches
 from git_scripts.git.worktrees import (
@@ -45,15 +42,15 @@ def handle_interactive_conflict(
             ans = ui.ask_choice(
                 "How would you like to handle this?",
                 choices=[
-                    "Abort rebase and rollback",
+                    "Rollback stack and skip to next",
                     "Resolve manually, then continue",
-                    "Abort script without rollback",
+                    "Exit script without rollback",
                 ],
-                default="Abort rebase and rollback",
+                default="Rollback stack and skip to next",
             )
 
             match ans:
-                case "Abort script without rollback":
+                case "Exit script without rollback":
                     ui.print(
                         "    [yellow]Leaving repository in current state "
                         "(rebase in progress).[/yellow]"
@@ -125,7 +122,7 @@ def check_and_report_worktree_blocks(
         for ref in stack_refs:
             if is_in_another_worktree(repo_path, ref):
                 ui.print(
-                    f"\n[yellow]⚠️  Warning: Branch "
+                    "\n[yellow]⚠️  Warning: Branch "
                     f"'[bold]{ref}[/bold]'"
                     " in stack is checked out in another "
                     "worktree.[/yellow]"

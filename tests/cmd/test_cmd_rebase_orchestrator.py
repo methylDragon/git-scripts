@@ -12,7 +12,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self, mock_rebase_continue
     ):
         mock_ui = MagicMock()
-        mock_ui.ask_choice.return_value = "Abort script without rollback"
+        mock_ui.ask_choice.return_value = "Exit script without rollback"
 
         with self.assertRaises(ScriptAbortError):
             handle_interactive_conflict(".", mock_ui, "my-branch")
@@ -26,7 +26,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
     @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
     def test_handle_interactive_conflict_abort_rebase(self, mock_rebase_abort):
         mock_ui = MagicMock()
-        mock_ui.ask_choice.return_value = "Abort rebase and rollback"
+        mock_ui.ask_choice.return_value = "Rollback stack and skip to next"
 
         status, err_msg = handle_interactive_conflict(
             ".", mock_ui, "my-branch"

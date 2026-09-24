@@ -117,7 +117,7 @@ class TestCmdEvolve(absltest.TestCase):
 
         mock_ui = mock.MagicMock()
         mock_ui.confirm.return_value = True
-        mock_ui.ask_choice.return_value = "Abort rebase and rollback"
+        mock_ui.ask_choice.return_value = "Rollback stack and skip to next"
 
         result = execute_evolve(
             self.repo_helper.path, old_hash=self.old_hash, ui=mock_ui
