@@ -145,7 +145,7 @@ def execute_gk_install(
     to_prune, kept = analyze_prunable_tags(common_git_dir, config)
     backup_refs = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
     pruned_count = prune_tags(common_git_dir, to_prune, backup_refs)
-    record_prune_marker(common_git_dir)
+    record_prune_marker(common_git_dir, pruned_count=pruned_count)
 
     cleaned_rs = apply_gk_settings(
         gk_root=effective_gk_root,
@@ -255,6 +255,28 @@ def execute_gk_uninstall(
     )
 
 
+def _format_last_prune_summary(common_git_dir: Path) -> str | None:
+    """Formats a human-readable summary from last_tag_prune.json if present."""
+    marker = common_git_dir / "gk-optimizer" / "last_tag_prune.json"
+    if not marker.is_file():
+        return None
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        iso_time = data.get("last_prune_iso") or str(
+            data.get("last_prune_epoch", "unknown")
+        )
+        pruned = data.get("last_pruned_count", 0)
+        loose = data.get("loose_tags_count", 0)
+        packed_sz = data.get("packed_refs_size", 0)
+        return (
+            f"last_tag_prune: {iso_time}"
+            f" (pruned={pruned}, loose_tags={loose},"
+            f" packed_refs_bytes={packed_sz})"
+        )
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def execute_gk_verify(
     repo_path: str | Path,
     ui: UI,
@@ -310,5 +332,9 @@ def execute_gk_verify(
     for name, ok in checks.items():
         mark = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
         ui.print(f"{mark} {name}")
+    if expect == GkExpectMode.INSTALLED:
+        prune_summary = _format_last_prune_summary(common_git_dir)
+        if prune_summary:
+            ui.print(f"[cyan]INFO[/cyan] {prune_summary}")
 
     return GkVerifyResult(passed=passed, checks=checks, failures=failures)

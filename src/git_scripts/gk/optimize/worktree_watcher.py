@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 from filelock import FileLock, Timeout  # pylint: disable=import-error
@@ -143,7 +144,7 @@ def _snapshot_worktree_heads(common_git_dir: Path) -> dict[str, str]:
 
 
 def _snapshot_tag_state(common_git_dir: Path) -> float:
-    """Returns a combined mtime marker for packed-refs and loose tag dirs."""
+    """Returns a combined mtime marker for packed-refs and all tag dirs."""
     mtimes: list[float] = []
     packed = common_git_dir / "packed-refs"
     try:
@@ -152,17 +153,16 @@ def _snapshot_tag_state(common_git_dir: Path) -> float:
         pass
     tags_dir = common_git_dir / "refs" / "tags"
     if tags_dir.is_dir():
-        try:
-            mtimes.append(tags_dir.stat().st_mtime)
-            for child in tags_dir.iterdir():
-                if child.is_dir():
-                    mtimes.append(child.stat().st_mtime)
-        except OSError:
-            pass
+        for root, _, _ in os.walk(tags_dir):
+            try:
+                mtimes.append(Path(root).stat().st_mtime)
+            except OSError:
+                continue
     return max(mtimes) if mtimes else 0.0
 
 
 PACKED_REFS_FLOOD_BYTES = 8192
+LOOSE_TAGS_FLOOD_COUNT = 5
 
 
 def _get_packed_refs_size(common_git_dir: Path) -> int:
@@ -174,16 +174,37 @@ def _get_packed_refs_size(common_git_dir: Path) -> int:
         return 0
 
 
+def _count_loose_tags(common_git_dir: Path) -> int:
+    """Returns the total number of loose tag ref files under refs/tags."""
+    tags_dir = common_git_dir / "refs" / "tags"
+    if not tags_dir.is_dir():
+        return 0
+    return sum(len(files) for _, _, files in os.walk(tags_dir))
+
+
+def _format_epoch_iso(epoch: float) -> str:
+    """Formats a Unix timestamp as a local timezone ISO-8601 string."""
+    return (
+        datetime.fromtimestamp(epoch)
+        .astimezone()
+        .isoformat(timespec="seconds")
+    )
+
+
 def record_prune_marker(
     common_git_dir: Path,
     now_epoch: float | None = None,
+    pruned_count: int = 0,
 ) -> Path:
-    """Writes current epoch and packed-refs size to last_tag_prune.json."""
+    """Writes prune timestamp, count, and ref stats to last_tag_prune.json."""
     marker = common_git_dir / "gk-optimizer" / "last_tag_prune.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
     epoch = now_epoch if now_epoch is not None else time.time()
     payload = {
         "last_prune_epoch": epoch,
+        "last_prune_iso": _format_epoch_iso(epoch),
+        "last_pruned_count": int(pruned_count),
+        "loose_tags_count": _count_loose_tags(common_git_dir),
         "packed_refs_size": _get_packed_refs_size(common_git_dir),
     }
     marker.write_text(
@@ -197,7 +218,7 @@ def should_prune_tags(
     common_git_dir: Path,
     now_epoch: float | None = None,
 ) -> bool:
-    """Returns True if >= prune_interval_hours passed or packed-refs spiked."""
+    """Returns True if interval elapsed or packed/loose tag refs spiked."""
     marker = common_git_dir / "gk-optimizer" / "last_tag_prune.json"
     if not marker.is_file():
         return True
@@ -205,12 +226,15 @@ def should_prune_tags(
         data = json.loads(marker.read_text(encoding="utf-8"))
         last_epoch = float(data.get("last_prune_epoch", 0.0))
         last_size = int(data.get("packed_refs_size", 0))
+        last_loose = int(data.get("loose_tags_count", 0))
     except (OSError, ValueError, TypeError, AttributeError):
         return True
 
+    packed_delta = _get_packed_refs_size(common_git_dir) - last_size
+    loose_delta = _count_loose_tags(common_git_dir) - last_loose
     if (
-        _get_packed_refs_size(common_git_dir) - last_size
-        > PACKED_REFS_FLOOD_BYTES
+        packed_delta > PACKED_REFS_FLOOD_BYTES
+        or loose_delta > LOOSE_TAGS_FLOOD_COUNT
     ):
         return True
 
@@ -227,11 +251,11 @@ def prune_excess_tags(common_git_dir: Path) -> int:
     config = read_config(cfg_path if cfg_path.is_file() else None)
     to_prune, _ = analyze_prunable_tags(common_git_dir, config)
     if not to_prune:
-        record_prune_marker(common_git_dir)
+        record_prune_marker(common_git_dir, pruned_count=0)
         return 0
     backup_file = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
     pruned = prune_tags(common_git_dir, to_prune, backup_file=backup_file)
-    record_prune_marker(common_git_dir)
+    record_prune_marker(common_git_dir, pruned_count=pruned)
     return pruned
 
 
@@ -272,11 +296,11 @@ def _poll_single_repo(
     prev_wt_by_repo[git_dir] = cur_wt
 
     cur_tag_mtime = _snapshot_tag_state(git_dir)
-    if cur_tag_mtime > prev_tag_by_repo.get(
-        git_dir, 0.0
-    ) and should_prune_tags(git_dir):
-        prune_excess_tags(git_dir)
-        prev_tag_by_repo[git_dir] = _snapshot_tag_state(git_dir)
+    if cur_tag_mtime > prev_tag_by_repo.get(git_dir, 0.0):
+        if should_prune_tags(git_dir):
+            prune_excess_tags(git_dir)
+            cur_tag_mtime = _snapshot_tag_state(git_dir)
+        prev_tag_by_repo[git_dir] = cur_tag_mtime
 
 
 def execute_watch_daemon(

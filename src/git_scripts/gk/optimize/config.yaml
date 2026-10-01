@@ -15,9 +15,9 @@ tags:
 
   # Historical tag globs excluded from CLI `git fetch` via `^refs/tags/<pattern>`.
   blocked_fetch_patterns:
-    - "candidate/20*"
-    - "platform/20*"
-    - "release/20*"
+    - "candidate/*"
+    - "platform/*"
+    - "release/*"
 
 watcher:
   # Real directory names hidden from GitKraken's NSFW (@axosoft/nsfw) inotify

@@ -66,19 +66,55 @@ def _normalize_negative_tag_refspec(pattern: str) -> str:
     return f"^{clean}"
 
 
+def _unset_fetch_refspec(common_git_dir: Path, spec: str) -> None:
+    """Removes a specific refspec value from local remote.origin.fetch."""
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(common_git_dir),
+            "config",
+            "--local",
+            "--unset-all",
+            "--fixed-value",
+            "remote.origin.fetch",
+            spec,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def apply_fetch_refspecs(
     common_git_dir: Path,
     exclude_globs: list[str],
     state: dict[str, Any],
 ) -> None:
-    """Adds negative refspecs (^refs/tags/...) to remote.origin.fetch."""
+    """Adds negative refspecs (^refs/tags/...) and prunes stale added ones."""
     existing = _get_git_config_values(common_git_dir, "remote.origin.fetch")
     neg_specs = [_normalize_negative_tag_refspec(g) for g in exclude_globs]
-    if "remote.origin.fetch" not in state.get("fetch_refspecs", {}):
-        state.setdefault("fetch_refspecs", {})["remote.origin.fetch"] = {
-            "pre_install": existing,
-            "added": neg_specs,
-        }
+    fetch_state = state.setdefault("fetch_refspecs", {})
+    entry = fetch_state.get("remote.origin.fetch")
+    if not isinstance(entry, dict):
+        pre_install = [s for s in existing if not s.startswith("^refs/tags/")]
+        prev_added: list[str] = []
+        entry = {"pre_install": pre_install, "added": neg_specs}
+        fetch_state["remote.origin.fetch"] = entry
+    else:
+        pre_install = list(entry.get("pre_install", []))
+        prev_added = list(entry.get("added", []))
+        entry["added"] = neg_specs
+
+    stale_specs = [
+        spec
+        for spec in existing
+        if spec not in pre_install
+        and spec not in neg_specs
+        and (spec in prev_added or spec.startswith("^refs/tags/"))
+    ]
+    for spec in stale_specs:
+        _unset_fetch_refspec(common_git_dir, spec)
 
     for spec in neg_specs:
         if spec not in existing:
@@ -108,27 +144,12 @@ def revert_fetch_refspecs(
     if not isinstance(entry, dict):
         return
     added_specs: list[str] = entry.get("added", [])
-    fetch_key = "remote.origin.fetch"
-    current_specs = _get_git_config_values(common_git_dir, fetch_key)
+    current_specs = _get_git_config_values(
+        common_git_dir, "remote.origin.fetch"
+    )
     for spec in added_specs:
         if spec in current_specs:
-            escaped_spec = spec.replace("^", r"\^")
-            pattern = f"^{escaped_spec}$"
-            subprocess.run(
-                [
-                    "git",
-                    "--git-dir",
-                    str(common_git_dir),
-                    "config",
-                    "--local",
-                    "--unset-all",
-                    "remote.origin.fetch",
-                    pattern,
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            _unset_fetch_refspec(common_git_dir, spec)
 
 
 def _trim_repo_settings_file(

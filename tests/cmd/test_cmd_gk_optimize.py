@@ -24,6 +24,7 @@ from git_scripts.gk.optimize.models import (
 )
 from git_scripts.gk.optimize.shim_builder import build_shim
 from git_scripts.gk.optimize.worktree_watcher import (
+    _snapshot_tag_state,
     _snapshot_worktree_heads,
     nudge_worktree_nsfw,
     prune_excess_tags,
@@ -577,12 +578,19 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
     def test_should_prune_tags_respects_interval_and_flood_tripwire(
         self,
     ) -> None:
-        """Verifies lazy 12h cooldown and >32KB packed-refs flood tripwire."""
+        """Verifies 12h cooldown, ISO marker, and packed/loose flood checks."""
         main_repo, _ = setup_multi_worktree_gk_repo(
             self.repo_helper, self.tmp_path
         )
         common_git_dir = main_repo / ".git"
-        record_prune_marker(common_git_dir, now_epoch=1000.0)
+        prune_excess_tags(common_git_dir)
+        marker = record_prune_marker(
+            common_git_dir, now_epoch=1000.0, pruned_count=17
+        )
+        marker_data = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertIn("T", marker_data["last_prune_iso"])
+        self.assertEqual(marker_data["last_pruned_count"], 17)
+        self.assertEqual(marker_data["loose_tags_count"], 0)
 
         self.assertFalse(
             should_prune_tags(common_git_dir, now_epoch=1000.0 + 3600.0)
@@ -591,10 +599,98 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             should_prune_tags(common_git_dir, now_epoch=1000.0 + 12.0 * 3600.0)
         )
 
+        # Loose tag flood (> 5 loose tag files) within cooldown triggers prune.
+        loose_dir = common_git_dir / "refs" / "tags" / "release" / "assets"
+        loose_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(6):
+            (loose_dir / f"202609{i:02d}.RC00").write_text(
+                "0" * 40 + "\n", encoding="utf-8"
+            )
+        self.assertTrue(
+            should_prune_tags(common_git_dir, now_epoch=1000.0 + 10.0)
+        )
+
+        # Reset marker and verify >8KB packed-refs flood also triggers prune.
+        record_prune_marker(common_git_dir, now_epoch=2000.0)
         (common_git_dir / "packed-refs").write_bytes(b"a" * 40000)
         self.assertTrue(
-            should_prune_tags(common_git_dir, now_epoch=1000.0 + 60.0)
+            should_prune_tags(common_git_dir, now_epoch=2000.0 + 60.0)
         )
+
+    def test_snapshot_tag_state_tracks_nested_tag_subdirectories(self) -> None:
+        """Verifies _snapshot_tag_state detects changes in nested tag dirs."""
+        main_repo, _ = setup_multi_worktree_gk_repo(
+            self.repo_helper, self.tmp_path
+        )
+        common_git_dir = main_repo / ".git"
+        nested_dir = common_git_dir / "refs" / "tags" / "release" / "assets"
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        before = _snapshot_tag_state(common_git_dir)
+
+        future_mtime = before + 5000.0
+        os.utime(nested_dir, (future_mtime, future_mtime))
+        after = _snapshot_tag_state(common_git_dir)
+        self.assertEqual(after, future_mtime)
+
+    def test_execute_gk_install_replaces_stale_negative_fetch_refspecs(
+        self,
+    ) -> None:
+        """Verifies re-running install prunes obsolete ^refs/tags/* specs."""
+        main_repo, wt_repo = setup_multi_worktree_gk_repo(
+            self.repo_helper, self.tmp_path
+        )
+        home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
+        old_yaml = self.tmp_path / "old.yaml"
+        write_config(
+            GkOptimizerConfig(
+                tags=GkTagConfig(
+                    blocked_fetch_patterns=[
+                        "candidate/2023*",
+                        "release/20*",
+                    ]
+                )
+            ),
+            old_yaml,
+        )
+        execute_gk_install(
+            repo_path=wt_repo,
+            ui=self.ui,
+            config_path=old_yaml,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+        )
+
+        new_yaml = self.tmp_path / "new.yaml"
+        write_config(
+            GkOptimizerConfig(
+                tags=GkTagConfig(
+                    blocked_fetch_patterns=[
+                        "candidate/*",
+                        "release/*",
+                    ]
+                )
+            ),
+            new_yaml,
+        )
+        execute_gk_install(
+            repo_path=wt_repo,
+            ui=self.ui,
+            config_path=new_yaml,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+        )
+        fetch_specs = (
+            run_git(
+                ["config", "--get-all", "remote.origin.fetch"],
+                cwd=str(main_repo),
+            )
+            .stdout.strip()
+            .splitlines()
+        )
+        self.assertIn("^refs/tags/candidate/*", fetch_specs)
+        self.assertIn("^refs/tags/release/*", fetch_specs)
+        self.assertNotIn("^refs/tags/candidate/2023*", fetch_specs)
+        self.assertNotIn("^refs/tags/release/20*", fetch_specs)
 
     def test_snapshot_worktree_heads_ignores_index_mtime_changes(
         self,
