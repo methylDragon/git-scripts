@@ -51,6 +51,23 @@ class TestCli(absltest.TestCase):
         except SystemExit as e:
             self.assertEqual(e.code, 0)
         mock_exec.assert_called_once()
+        self.assertFalse(mock_exec.call_args.kwargs["also_prune_no_upstream"])
+
+    @mock.patch(
+        "sys.argv",
+        ["git-scripts", "prune-local", "--also-prune-no-upstream"],
+    )
+    @mock.patch("git_scripts.cli.execute_prune_local")
+    def test_main_routes_to_prune_local_with_no_upstream_flag_when_invoked(
+        self, mock_exec
+    ):
+        mock_exec.return_value = True
+        try:
+            main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        mock_exec.assert_called_once()
+        self.assertTrue(mock_exec.call_args.kwargs["also_prune_no_upstream"])
 
     @mock.patch("sys.argv", ["git-scripts", "prune-remote-prefix", "feat/"])
     @mock.patch("git_scripts.cli.execute_prune_remote_prefix")

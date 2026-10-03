@@ -109,6 +109,17 @@ class SingleBranchResult:
 
 
 @dataclass(frozen=True)
+class LocalPruneResult:
+    """Result of analyzing local branches for pruning."""
+
+    # Branches whose upstream is gone or that are merged with no upstream.
+    orphaned_branches: list[str]
+
+    # Unmerged local branches lacking an upstream tracking branch.
+    unmerged_no_upstream_branches: list[str]
+
+
+@dataclass(frozen=True)
 class RemotePruneResult:
     """Result of analyzing remote branches for pruning."""
 

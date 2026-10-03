@@ -256,9 +256,19 @@ def evolve(
 
 @app.command("prune-local")
 def prune_local(
+    target: Annotated[str, typer.Argument(help="Target branch")] = "main",
     dry_run: Annotated[
         bool,
         typer.Option("-n", "--dry-run", help="Run without making changes"),
+    ] = False,
+    also_prune_no_upstream: Annotated[
+        bool,
+        typer.Option(
+            "--also-prune-no-upstream",
+            help=(
+                "Also prune local branches lacking an upstream tracking branch"
+            ),
+        ),
     ] = False,
     plain: Annotated[
         bool,
@@ -279,7 +289,13 @@ def prune_local(
     """Prunes local branches whose remote tracking branches are gone."""
     ui = UI(plain=plain, auto_yes=yes)
 
-    success = execute_prune_local(repo_path=".", dry_run=dry_run, ui=ui)
+    success = execute_prune_local(
+        repo_path=".",
+        dry_run=dry_run,
+        also_prune_no_upstream=also_prune_no_upstream,
+        target=target,
+        ui=ui,
+    )
     raise typer.Exit(code=0 if success else 1)
 
 

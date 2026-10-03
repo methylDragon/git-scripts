@@ -121,6 +121,119 @@ class TestCmdPrune(absltest.TestCase):
                 ):
                     self.fail("git branch -D called during dry run")
 
+    def test_execute_prune_local_categorizes_obsolete_and_unmerged_no_upstream(
+        self,
+    ):
+        """Verifies --also-prune-no-upstream buckets merged and unmerged."""
+        clean_helper = GitTestRepo(use_template=False)
+        self.addCleanup(clean_helper.cleanup)
+        clean_repo = pygit2.Repository(clean_helper.path)
+
+        # Create an untracked branch merged into main (obsolete)
+        clean_helper.checkout("ch3/merged", create=True)
+        clean_helper.commit("m1", "m1.txt", "merged")
+        merged_id = clean_repo.revparse_single("ch3/merged").id
+        clean_helper.checkout("main")
+        clean_repo.references.create("refs/heads/main", merged_id, force=True)
+
+        # Create an untracked branch with unmerged commits
+        clean_helper.checkout("ch3/unmerged", create=True)
+        clean_helper.commit("u1", "u1.txt", "unmerged")
+
+        # Create a tracked branch with active upstream (must not be pruned)
+        clean_helper.add_remote("origin", "https://example.com/repo.git")
+        clean_helper.checkout("ch3/tracked", create=True)
+        clean_helper.commit("t1", "t1.txt", "tracked")
+        tracked_id = clean_repo.revparse_single("ch3/tracked").id
+        clean_repo.references.create(
+            "refs/remotes/origin/ch3/tracked", tracked_id, force=True
+        )
+        clean_repo.branches.local[
+            "ch3/tracked"
+        ].upstream = clean_repo.branches.remote["origin/ch3/tracked"]
+
+        # Create a branch checked out in another worktree
+        clean_helper.checkout("ch3/in-worktree", create=True)
+        clean_helper.commit("w1", "w1.txt", "worktree")
+        clean_helper.checkout("main")
+
+        with mock.patch("git_scripts.cmd.prune_local.run_cmd") as mock_run_cmd:
+
+            def mock_run(cmd, cwd=None, check=True):
+                del cwd, check
+                if cmd == ["git", "worktree", "list", "--porcelain"]:
+                    return (
+                        "branch refs/heads/main\n"
+                        "branch refs/heads/ch3/in-worktree\n"
+                    )
+                return ""
+
+            mock_run_cmd.side_effect = mock_run
+
+            # User deletes orphaned/obsolete bucket, skips unmerged bucket
+            with mock.patch(
+                "git_scripts.ui.UI.ask_choice",
+                side_effect=["Delete all", "Skip all"],
+            ) as mock_ask:
+                result = execute_prune_local(
+                    clean_helper.path,
+                    dry_run=False,
+                    also_prune_no_upstream=True,
+                )
+            self.assertTrue(result)
+            self.assertEqual(mock_ask.call_count, 2)
+            mock_run_cmd.assert_any_call(
+                ["git", "branch", "-D", "ch3/merged"],
+                cwd=clean_helper.path,
+            )
+
+            # User deletes both buckets
+            mock_run_cmd.reset_mock()
+            with mock.patch(
+                "git_scripts.ui.UI.ask_choice",
+                side_effect=["Delete all", "Delete all"],
+            ):
+                result = execute_prune_local(
+                    clean_helper.path,
+                    dry_run=False,
+                    also_prune_no_upstream=True,
+                )
+            self.assertTrue(result)
+            mock_run_cmd.assert_any_call(
+                ["git", "branch", "-D", "ch3/merged", "ch3/unmerged"],
+                cwd=clean_helper.path,
+            )
+
+            # Missing target ref conservatively buckets untracked as unmerged
+            # and supports interactive checkbox selection
+            mock_run_cmd.reset_mock()
+            with (
+                mock.patch(
+                    "git_scripts.ui.UI.ask_choice",
+                    return_value="Select which to delete",
+                ) as mock_ask_missing,
+                mock.patch(
+                    "git_scripts.ui.UI.ask_checkbox",
+                    return_value=["ch3/unmerged"],
+                ) as mock_checkbox,
+            ):
+                result = execute_prune_local(
+                    clean_helper.path,
+                    dry_run=False,
+                    also_prune_no_upstream=True,
+                    target="nonexistent",
+                )
+            self.assertTrue(result)
+            mock_ask_missing.assert_called_once()
+            mock_checkbox.assert_called_once_with(
+                "Select unmerged local branches to delete:",
+                choices=["ch3/merged", "ch3/unmerged"],
+            )
+            mock_run_cmd.assert_any_call(
+                ["git", "branch", "-D", "ch3/unmerged"],
+                cwd=clean_helper.path,
+            )
+
     @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
     def test_execute_prune_remote_prefix_deletes_merged_branches(
         self, mock_subprocess_run
