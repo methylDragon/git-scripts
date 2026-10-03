@@ -143,13 +143,79 @@ def check_and_report_worktree_blocks(
     return False
 
 
+def _record_rebase_success(
+    branch: str,
+    pre_stack_refs: set[str],
+    config: BatchRebaseConfig,
+    result: SingleBranchResult,
+) -> None:
+    """Records updated, obsolete, and co-located branches after a rebase."""
+    try:
+        repo = pygit2.Repository(config.repo_path)
+        stack_refs = pre_stack_refs | get_stack_branches(
+            repo, branch, config.prefix, branch_pool=config.branch_pool
+        )
+        sync_colocated_branches(
+            repo, branch, stack_refs, config.analyzer, config.repo_path
+        )
+
+        for ref in stack_refs:
+            try:
+                act_hash = str(repo.revparse_single(ref).id)
+            except KeyError:
+                continue
+            if is_obsolete(repo, pygit2.Oid(hex=act_hash), config.target):
+                result.branches_to_delete.add(ref)
+            else:
+                result.branches_to_keep.add(ref)
+
+        result.success_log.append(
+            format_stack_tree(
+                repo,
+                branch,
+                config.prefix,
+                config.target,
+                True,
+                config.branch_pool,
+            )
+        )
+    except (KeyError, ValueError, pygit2.GitError, GitExecutionError):
+        pass
+
+
+def _record_rebase_failure(
+    repo: pygit2.Repository,
+    branch: str,
+    config: BatchRebaseConfig,
+    err_msg: str | None,
+) -> str:
+    """Cleans up any wedged rebase state and formats a failure tree entry."""
+    if is_worktree_busy(config.repo_path):
+        rebase_abort(config.repo_path)
+
+    tree_str = format_stack_tree(
+        repo,
+        branch,
+        config.prefix,
+        config.target,
+        False,
+        config.branch_pool,
+    )
+    if err_msg:
+        indented_err = "\n".join(
+            "      " + line for line in err_msg.splitlines()
+        )
+        tree_str += f"\n{indented_err}"
+    return tree_str
+
+
 def rebase_single_branch(
     branch: str,
     config: BatchRebaseConfig,
     failed_branches: set[str],
     ui: UI,
-) -> SingleBranchResult:
-    """Attempts to rebase a single branch during batch rebasing."""
+) -> tuple[SingleBranchResult, bool]:
+    """Attempts to rebase a single branch in Pass 1, deferring conflicts."""
     result = SingleBranchResult()
     repo = pygit2.Repository(config.repo_path)
     stack_refs = get_stack_branches(
@@ -165,16 +231,9 @@ def rebase_single_branch(
         ui,
     ):
         result.failed_log.append(
-            format_stack_tree(
-                repo,
-                branch,
-                config.prefix,
-                config.target,
-                False,
-                config.branch_pool,
-            )
+            _record_rebase_failure(repo, branch, config, None)
         )
-        return result
+        return result, False
 
     plan = create_rebase_plan(config.analyzer, branch)
 
@@ -190,8 +249,44 @@ def rebase_single_branch(
             )
         )
         result.branches_to_delete.update(stack_refs)
-        return result
+        return result, False
 
+    status, err_msg = execute_rebase_plan(
+        plan, config.repo_path, config.target
+    )
+
+    if status == RebaseStatus.CONFLICT:
+        rebase_abort(config.repo_path)
+        ui.print(
+            "    [yellow]⏸️  Conflict detected on branch "
+            f"'[bold]{branch}[/bold]'. Rolling back and deferring to "
+            "second pass...[/yellow]"
+        )
+        return result, True
+
+    if status == RebaseStatus.SUCCESS:
+        _record_rebase_success(branch, stack_refs, config, result)
+    else:
+        result.failed_log.append(
+            _record_rebase_failure(repo, branch, config, err_msg)
+        )
+
+    return result, False
+
+
+def resolve_conflicted_branch(
+    branch: str,
+    config: BatchRebaseConfig,
+    ui: UI,
+) -> SingleBranchResult:
+    """Re-attempts a deferred branch in Pass 2 with interactive resolution."""
+    result = SingleBranchResult()
+    repo = pygit2.Repository(config.repo_path)
+    stack_refs = get_stack_branches(
+        repo, branch, config.prefix, branch_pool=config.branch_pool
+    )
+
+    plan = create_rebase_plan(config.analyzer, branch)
     status, err_msg = execute_rebase_plan(
         plan, config.repo_path, config.target
     )
@@ -202,52 +297,38 @@ def rebase_single_branch(
         )
 
     if status == RebaseStatus.SUCCESS:
-        try:
-            repo = pygit2.Repository(config.repo_path)
-            sync_colocated_branches(
-                repo, branch, stack_refs, config.analyzer, config.repo_path
-            )
-
-            for ref in stack_refs:
-                try:
-                    act_hash = str(repo.revparse_single(ref).id)
-                except KeyError:
-                    continue
-                if is_obsolete(repo, pygit2.Oid(hex=act_hash), config.target):
-                    result.branches_to_delete.add(ref)
-                else:
-                    result.branches_to_keep.add(ref)
-
-            result.success_log.append(
-                format_stack_tree(
-                    repo,
-                    branch,
-                    config.prefix,
-                    config.target,
-                    True,
-                    config.branch_pool,
-                )
-            )
-        except Exception:
-            pass
+        _record_rebase_success(branch, stack_refs, config, result)
     else:
-        tree_str = format_stack_tree(
-            repo,
-            branch,
-            config.prefix,
-            config.target,
-            False,
-            config.branch_pool,
+        failure_msg = err_msg if status != RebaseStatus.CONFLICT else None
+        result.failed_log.append(
+            _record_rebase_failure(repo, branch, config, failure_msg)
         )
-        if err_msg and status != RebaseStatus.CONFLICT:
-            # Append the error message under the tree, indented for readability
-            indented_err = "\n".join(
-                "      " + line for line in err_msg.splitlines()
-            )
-            tree_str += f"\n{indented_err}"
-        result.failed_log.append(tree_str)
 
     return result
+
+
+def _run_conflict_resolution_pass(
+    deferred_branches: list[str],
+    config: BatchRebaseConfig,
+    ui: UI,
+    batch_result: SingleBranchResult,
+) -> None:
+    """Runs the second pass to interactively resolve deferred conflicts."""
+    if not deferred_branches:
+        return
+
+    total_conflicts = len(deferred_branches)
+    stack_word = ui.pluralize(total_conflicts, "conflicted stack")
+    ui.print(
+        f"\n[bold yellow]⚠️  Pass 2: Resolving {stack_word}...[/bold yellow]"
+    )
+    for i, branch in enumerate(deferred_branches, 1):
+        ui.print(
+            f"\n[cyan]🔄  Conflicted Stack ({i}/{total_conflicts}): "
+            f"[bold]{branch}[/bold][/cyan]"
+        )
+        branch_res = resolve_conflicted_branch(branch, config, ui)
+        batch_result.aggregate(branch_res)
 
 
 def rebase_loop(
@@ -271,45 +352,51 @@ def rebase_loop(
         branch_pool=branch_pool,
     )
 
-    with manage_worktrees(
-        prefix=prefix,
-        active=all_worktrees,
-        repo_path=repo_path,
-        target_branches=list(branch_pool),
-        callbacks=get_ui_worktree_callbacks(ui),
-    ) as wt_state:
-        failed_branches = wt_state.failed_branches
-        with Progress(console=ui.console, transient=True) as progress:
-            ui.active_progress = progress
-            total_tips = len(analyzer.tips)
-            task = progress.add_task(
-                "[cyan]Rebasing stacks...", total=total_tips
+    try:
+        with manage_worktrees(
+            prefix=prefix,
+            active=all_worktrees,
+            repo_path=repo_path,
+            target_branches=list(branch_pool),
+            callbacks=get_ui_worktree_callbacks(ui),
+        ) as wt_state:
+            failed_branches = wt_state.failed_branches
+            deferred_branches: list[str] = []
+            with Progress(console=ui.console, transient=True) as progress:
+                ui.active_progress = progress
+                total_tips = len(analyzer.tips)
+                task = progress.add_task(
+                    "[cyan]Rebasing stacks...", total=total_tips
+                )
+                try:
+                    for i, branch in enumerate(analyzer.tips, 1):
+                        progress.update(
+                            task,
+                            description=(
+                                f"[cyan]Processing Stack ({i}/{total_tips}): "
+                                f"{branch}..."
+                            ),
+                        )
+
+                        branch_res, deferred = rebase_single_branch(
+                            branch,
+                            config,
+                            failed_branches,
+                            ui,
+                        )
+
+                        batch_result.aggregate(branch_res)
+                        if deferred:
+                            deferred_branches.append(branch)
+                        progress.advance(task)
+                finally:
+                    ui.active_progress = None
+
+            _run_conflict_resolution_pass(
+                deferred_branches, config, ui, batch_result
             )
-            try:
-                for i, branch in enumerate(analyzer.tips, 1):
-                    progress.update(
-                        task,
-                        description=(
-                            f"[cyan]Processing Stack ({i}/{total_tips}): "
-                            f"{branch}..."
-                        ),
-                    )
-
-                    branch_res = rebase_single_branch(
-                        branch,
-                        config,
-                        failed_branches,
-                        ui,
-                    )
-
-                    batch_result.aggregate(branch_res)
-                    progress.advance(task)
-
-            except ScriptAbortError:
-                ui.active_progress = None
-                return batch_result, False
-            finally:
-                ui.active_progress = None
+    except ScriptAbortError:
+        return batch_result, False
 
     return batch_result, True
 
