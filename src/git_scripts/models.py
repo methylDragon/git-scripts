@@ -150,3 +150,22 @@ class WorktreeState:
 
     # Branches that could not be detached (e.g., due to active merges).
     failed_branches: set[str]
+
+
+@dataclass(frozen=True)
+class RemotePushParityResult:
+    """Result of checking local branches against their remote tracking refs."""
+
+    # Branches missing on the target remote or with commits not yet pushed.
+    unpushed_branches: tuple[str, ...] = ()
+
+    # Subset of unpushed_branches that diverged and need --force-with-lease.
+    diverged_branches: tuple[str, ...] = ()
+
+    # Branches where the local branch is strictly behind <remote>/<branch>.
+    behind_remote_branches: tuple[str, ...] = ()
+
+    @property
+    def is_synced(self) -> bool:
+        """True if all checked branches match their remote tracking refs."""
+        return not self.unpushed_branches and not self.behind_remote_branches

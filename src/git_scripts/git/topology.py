@@ -1,7 +1,7 @@
 """Git branch topology analyzer and graph state manager."""
 
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import pygit2
 
@@ -13,7 +13,7 @@ from git_scripts.git.reads import (
     find_tips,
     is_obsolete,
 )
-from git_scripts.models import TopologyAnalysisResult
+from git_scripts.models import RemotePushParityResult, TopologyAnalysisResult
 
 
 class TopologyAnalyzer:
@@ -127,27 +127,54 @@ class TopologyAnalyzer:
         )
 
 
+def _get_commit_oid(
+    repo: pygit2.Repository, ref_or_branch: str
+) -> pygit2.Oid | None:
+    """Resolves a branch or reference name to a pygit2.Oid if valid."""
+    try:
+        obj = repo.revparse_single(ref_or_branch)
+    except (KeyError, ValueError, pygit2.GitError):
+        return None
+    commit_id = getattr(obj, "id", None)
+    return commit_id if isinstance(commit_id, pygit2.Oid) else None
+
+
+def _is_at_or_behind_stop_ref(
+    repo: pygit2.Repository, branch: str, stop_at: str | None
+) -> bool:
+    """Returns True if branch is stop_at or at/behind stop_at's commit."""
+    if not stop_at:
+        return False
+    if branch == stop_at:
+        return True
+    branch_oid = _get_commit_oid(repo, branch)
+    if branch_oid is None:
+        return False
+    for ref_name in (stop_at, f"refs/remotes/origin/{stop_at}"):
+        stop_oid = _get_commit_oid(repo, ref_name)
+        if stop_oid is None:
+            continue
+        if branch_oid == stop_oid:
+            return True
+        if repo.merge_base(stop_oid, branch_oid) == branch_oid:
+            return True
+    return False
+
+
 def check_remote_trunk_ancestry(
-    repo: pygit2.Repository, bottom_branch: str, target: str
+    repo: pygit2.Repository,
+    bottom_branch: str,
+    target: str,
+    remote: str = "origin",
 ) -> bool:
     """Checks if the remote target is an ancestor of the bottom branch."""
-    remote_target_ref = f"refs/remotes/origin/{target}"
-    try:
-        target_commit = repo.revparse_single(remote_target_ref)
-    except (KeyError, ValueError):
-        try:
-            target_commit = repo.revparse_single(target)
-        except (KeyError, ValueError):
-            return False
-
-    try:
-        bottom_commit = repo.revparse_single(bottom_branch)
-    except (KeyError, ValueError):
+    target_oid = _get_commit_oid(
+        repo, f"refs/remotes/{remote}/{target}"
+    ) or _get_commit_oid(repo, target)
+    bottom_oid = _get_commit_oid(repo, bottom_branch)
+    if target_oid is None or bottom_oid is None:
         return False
-
-    return (
-        repo.merge_base(target_commit.id, bottom_commit.id) == target_commit.id
-    )
+    return repo.merge_base(target_oid, bottom_oid) == target_oid
 
 
 def check_stack_continuity(
@@ -157,44 +184,81 @@ def check_stack_continuity(
 
     Returns (True, None) if continuous, or (False, broken_branch_name).
     """
-    for i in range(len(ordered_branches) - 1):
-        b1 = ordered_branches[i]
-        b2 = ordered_branches[i + 1]
-        try:
-            c1 = repo.revparse_single(b1)
-            c2 = repo.revparse_single(b2)
-        except (KeyError, ValueError):
-            return False, b2
-
-        if repo.merge_base(c1.id, c2.id) != c1.id:
+    for b1, b2 in zip(ordered_branches, ordered_branches[1:], strict=False):
+        oid1 = _get_commit_oid(repo, b1)
+        oid2 = _get_commit_oid(repo, b2)
+        if oid1 is None or oid2 is None or repo.merge_base(oid1, oid2) != oid1:
             return False, b2
 
     return True, None
+
+
+def _classify_branch_push_state(
+    repo: pygit2.Repository, branch: str, remote: str = "origin"
+) -> str:
+    """Classifies a branch as 'synced', 'unpushed', 'diverged', or 'behind'."""
+    local_oid = _get_commit_oid(repo, branch)
+    remote_oid = _get_commit_oid(repo, f"refs/remotes/{remote}/{branch}")
+    if local_oid is None or remote_oid is None:
+        return "unpushed"
+    if local_oid == remote_oid:
+        return "synced"
+
+    try:
+        merge_base_id = repo.merge_base(local_oid, remote_oid)
+    except (KeyError, ValueError, TypeError, pygit2.GitError):
+        return "unpushed"
+
+    if merge_base_id == remote_oid:
+        return "unpushed"
+    return "behind" if merge_base_id == local_oid else "diverged"
 
 
 def check_remote_push_parity(
-    repo: pygit2.Repository, branches: set[str]
-) -> tuple[bool, str | None]:
-    """Checks if local branch hashes exactly match remote tracking branches.
+    repo: pygit2.Repository,
+    branches: Sequence[str] | set[str],
+    remote: str = "origin",
+) -> RemotePushParityResult:
+    """Checks local branch hashes against their remote tracking branches."""
+    ordered = sorted(branches) if isinstance(branches, set) else list(branches)
+    unpushed: list[str] = []
+    diverged: list[str] = []
+    behind: list[str] = []
 
-    Returns (True, None) if all match, or (False, unpushed_branch_name).
-    """
-    for branch in sorted(branches):
-        try:
-            local_commit = repo.revparse_single(branch)
-        except (KeyError, ValueError):
-            return False, branch
+    for branch in ordered:
+        match _classify_branch_push_state(repo, branch, remote=remote):
+            case "unpushed":
+                unpushed.append(branch)
+            case "diverged":
+                unpushed.append(branch)
+                diverged.append(branch)
+            case "behind":
+                behind.append(branch)
 
-        remote_ref = f"refs/remotes/origin/{branch}"
-        try:
-            remote_commit = repo.revparse_single(remote_ref)
-        except (KeyError, ValueError):
-            return False, branch
+    return RemotePushParityResult(
+        unpushed_branches=tuple(unpushed),
+        diverged_branches=tuple(diverged),
+        behind_remote_branches=tuple(behind),
+    )
 
-        if local_commit.id != remote_commit.id:
-            return False, branch
 
-    return True, None
+def _compute_ancestor_distance(
+    repo: pygit2.Repository,
+    branch: str,
+    branch_id: pygit2.Oid,
+    candidate: str,
+    cand_id: pygit2.Oid,
+) -> float | None:
+    """Returns topological distance from cand_id to branch_id if ancestor."""
+    if repo.merge_base(cand_id, branch_id) != cand_id:
+        return None
+    if cand_id == branch_id:
+        # Co-located branches: break ties lexicographically (< 1 commit).
+        return 0.5 if candidate < branch else None
+
+    walker = repo.walk(branch_id, pygit2.enums.SortMode.TOPOLOGICAL)
+    walker.hide(cand_id)
+    return float(sum(1 for _ in walker))
 
 
 def get_parent_branch(
@@ -209,7 +273,7 @@ def get_parent_branch(
     parent = None
     min_dist = float("inf")
 
-    for candidate in candidate_branches:
+    for candidate in sorted(candidate_branches):
         if candidate == branch:
             continue
         try:
@@ -217,25 +281,38 @@ def get_parent_branch(
         except (KeyError, ValueError):
             continue
 
-        if repo.merge_base(cand_commit.id, branch_commit.id) != cand_commit.id:
-            continue
-
-        if cand_commit.id == branch_commit.id:
-            if candidate >= branch:
-                continue
-            dist = 0.5
-        else:
-            walker = repo.walk(
-                branch_commit.id, pygit2.enums.SortMode.TOPOLOGICAL
-            )
-            walker.hide(cand_commit.id)
-            dist = sum(1 for _ in walker)
-
-        if dist < min_dist:
+        dist = _compute_ancestor_distance(
+            repo, branch, branch_commit.id, candidate, cand_commit.id
+        )
+        if dist is not None and dist < min_dist:
             min_dist = dist
             parent = candidate
 
     return parent
+
+
+def _find_direct_children(
+    repo: pygit2.Repository,
+    curr: str,
+    pool: set[str],
+    stack: set[str],
+    stop_at: str | None,
+) -> list[str]:
+    """Finds direct child branches of curr in pool not behind stop_at."""
+    effective_pool = set(pool) | ({stop_at} if stop_at else set())
+    curr_oid = _get_commit_oid(repo, curr)
+    children = []
+    for branch in sorted(pool):
+        if branch in stack or _is_at_or_behind_stop_ref(repo, branch, stop_at):
+            continue
+        parent = get_parent_branch(repo, branch, effective_pool)
+        if not parent:
+            continue
+        if parent == curr or (
+            curr_oid is not None and _get_commit_oid(repo, parent) == curr_oid
+        ):
+            children.append(branch)
+    return children
 
 
 def find_linear_stack(
@@ -249,32 +326,36 @@ def find_linear_stack(
     This traverses both ancestors (up to stop_at) and descendants
     (up to the tip) to discover the complete stack.
     """
+    if _is_at_or_behind_stop_ref(repo, start_branch, stop_at):
+        return set()
+
+    effective_pool = set(pool) | ({stop_at} if stop_at else set())
     stack = {start_branch}
 
     # Walk up to ancestors
     curr = start_branch
     while True:
-        parent = get_parent_branch(repo, curr, pool)
-        if not parent:
-            break
-        if stop_at and parent == stop_at:
+        parent = get_parent_branch(repo, curr, effective_pool)
+        if not parent or _is_at_or_behind_stop_ref(repo, parent, stop_at):
             break
         stack.add(parent)
         curr = parent
 
-    # Walk down to descendants
+    # Walk down to descendants along a strictly linear path
     curr = start_branch
     while True:
-        child = None
-        for b in pool:
-            if b not in stack and get_parent_branch(repo, b, pool) == curr:
-                child = b
-                break
-
-        if not child:
+        children = _find_direct_children(repo, curr, pool, stack, stop_at)
+        if not children:
             break
-        stack.add(child)
-        curr = child
+        distinct_oids = {
+            oid
+            for b in children
+            if (oid := _get_commit_oid(repo, b)) is not None
+        }
+        if len(distinct_oids) > 1 or (not distinct_oids and len(children) > 1):
+            break
+        stack.update(children)
+        curr = children[0]
 
     return stack
 
@@ -293,7 +374,7 @@ def sort_branches_bottom_to_top(
     branch_to_children: dict[str, list[str]] = {b: [] for b in branches}
     roots = []
 
-    for b in branches:
+    for b in sorted(branches):
         p = parent_map.get(b)
         if p in branches:
             branch_to_children[p].append(b)

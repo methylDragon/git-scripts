@@ -369,6 +369,14 @@ def gh_align_pr_bases_and_sync_stacks(
             help="Interactively select which stacks/branches to align",
         ),
     ] = False,
+    remote: Annotated[
+        str | None,
+        typer.Option(
+            "--remote",
+            "-r",
+            help="Remote to align and link against (prompts if multiple)",
+        ),
+    ] = None,
     plain: Annotated[
         bool,
         typer.Option(
@@ -395,6 +403,7 @@ def gh_align_pr_bases_and_sync_stacks(
         current_stack_only=current,
         all_matching=all_matching,
         interactive=interactive,
+        remote=remote,
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)

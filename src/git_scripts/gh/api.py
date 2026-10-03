@@ -65,12 +65,16 @@ def check_gh_stack_installed() -> bool:
         return False
 
 
-def gh_stack_link(repo_path: str, branches: list[str]) -> None:
+def gh_stack_link(
+    repo_path: str, branches: list[str], remote: str | None = None
+) -> None:
     """Links branches into a PR stack using gh-stack."""
     if not branches:
         return
 
     cmd = ["gh", "stack", "link"]
+    if remote:
+        cmd.extend(["--remote", remote])
     cmd.extend(branches)
 
     try:

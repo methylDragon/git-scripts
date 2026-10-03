@@ -167,7 +167,25 @@ def test_check_gh_stack_installed_returns_false_when_extension_check_fails(
 @patch("subprocess.run")
 def test_gh_stack_link_invokes_gh_stack_link_for_branch_chain(mock_run):
     gh_stack_link(".", ["feat-a", "feat-b"])
-    mock_run.assert_called_once()
+    mock_run.assert_called_once_with(
+        ["gh", "stack", "link", "feat-a", "feat-b"],
+        cwd=".",
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+@patch("subprocess.run")
+def test_gh_stack_link_passes_remote_flag_when_specified(mock_run):
+    gh_stack_link(".", ["feat-a", "feat-b"], remote="upstream")
+    mock_run.assert_called_once_with(
+        ["gh", "stack", "link", "--remote", "upstream", "feat-a", "feat-b"],
+        cwd=".",
+        capture_output=True,
+        text=True,
+        check=True,
+    )
 
 
 @patch("subprocess.run")

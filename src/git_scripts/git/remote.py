@@ -1,8 +1,37 @@
 """Git remote operations (fetch, pull, push)."""
 
+import pygit2
+
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.worktrees import is_in_another_worktree
 from git_scripts.models import UpdateTargetResult
+
+
+def get_configured_remotes(repo: pygit2.Repository) -> list[str]:
+    """Returns sorted remote names configured on the repository."""
+    try:
+        remotes = repo.remotes
+    except (AttributeError, TypeError, pygit2.GitError):
+        return []
+
+    names = [
+        r.name
+        for r in remotes
+        if isinstance(getattr(r, "name", None), str) and r.name
+    ]
+    return sorted(set(names))
+
+
+def get_default_remote(repo: pygit2.Repository, remotes: list[str]) -> str:
+    """Determines the default remote from git config or common conventions."""
+    try:
+        push_default = repo.config["remote.pushDefault"]
+        if isinstance(push_default, str) and push_default in remotes:
+            return push_default
+    except (KeyError, TypeError, AttributeError, pygit2.GitError):
+        pass
+
+    return "origin" if not remotes or "origin" in remotes else remotes[0]
 
 
 def update_target(repo_path: str, target: str) -> UpdateTargetResult:
@@ -64,17 +93,19 @@ def update_target(repo_path: str, target: str) -> UpdateTargetResult:
                 f"Could not pull updates. Aborting.\n{e}"
             ) from e
         return UpdateTargetResult.SUCCESS
-    else:
-        return UpdateTargetResult.LOCAL_ONLY
+    return UpdateTargetResult.LOCAL_ONLY
 
 
 def push_branches(
-    branches: list[str], options: list[str], repo_path: str = "."
+    branches: list[str],
+    options: list[str],
+    repo_path: str = ".",
+    remote: str = "origin",
 ) -> bool:
-    """Pushes multiple branches to origin with optional git flags."""
+    """Pushes multiple branches to the target remote with optional flags."""
     if not branches:
         return True
-    cmd = ["git", "push", "origin"] + branches + options
+    cmd = ["git", "push", remote] + branches + options
     try:
         run_cmd(cmd, cwd=repo_path, capture_output=False)
         return True

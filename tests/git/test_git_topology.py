@@ -6,6 +6,7 @@ from absl.testing import absltest
 
 from git_scripts.git.topology import (
     TopologyAnalyzer,
+    check_remote_push_parity,
     find_linear_stack,
     sort_branches_bottom_to_top,
 )
@@ -111,6 +112,115 @@ class TestTopologyAnalyzer(absltest.TestCase):
                 find_linear_stack(repo, "start", {"b1", "b2", "start"}),
                 {"start", "b1", "b2"},
             )
+
+    def test_find_linear_stack_excludes_branch_colocated_with_target(self):
+        """Excludes unrelated branches parked on the same commit as target."""
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("aaa-parked-on-main", create=True)
+
+        self.repo_helper.checkout("feat/1", create=True)
+        self.repo_helper.commit("feat 1", "f1.txt", "1")
+
+        self.repo_helper.checkout("feat/2", create=True)
+        self.repo_helper.commit("feat 2", "f2.txt", "2")
+
+        pool = {"main", "aaa-parked-on-main", "feat/1", "feat/2"}
+        stack = find_linear_stack(self.repo, "feat/2", pool, stop_at="main")
+        self.assertEqual(stack, {"feat/1", "feat/2"})
+
+    def test_find_linear_stack_stops_downward_walk_when_fork_is_detected(self):
+        """Does not arbitrarily include forked descendant branches."""
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("feat/1", create=True)
+        self.repo_helper.commit("feat 1", "f1.txt", "1")
+
+        self.repo_helper.checkout("feat/2a", create=True)
+        self.repo_helper.commit("feat 2a", "f2a.txt", "2a")
+
+        self.repo_helper.checkout("feat/1")
+        self.repo_helper.checkout("feat/2b", create=True)
+        self.repo_helper.commit("feat 2b", "f2b.txt", "2b")
+
+        pool = {"main", "feat/1", "feat/2a", "feat/2b"}
+        stack = find_linear_stack(self.repo, "feat/1", pool, stop_at="main")
+        self.assertEqual(stack, {"feat/1"})
+
+    def test_check_remote_push_parity_classifies_branch_states(self):
+        """Classifies synced, unpushed, diverged, and behind branches."""
+        self.repo_helper.checkout("main")
+        main_id = self.repo.revparse_single("main").id
+
+        # 1. synced
+        self.repo_helper.checkout("b-synced", create=True)
+        self.repo_helper.commit("synced", "s.txt", "s")
+        synced_id = self.repo.revparse_single("b-synced").id
+        self.repo.references.create("refs/remotes/origin/b-synced", synced_id)
+
+        # 2. unpushed (no remote ref)
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("b-new", create=True)
+        self.repo_helper.commit("new", "n.txt", "n")
+
+        # 3. unpushed-ahead (fast-forwardable ahead of origin)
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("b-ahead", create=True)
+        self.repo_helper.commit("ahead", "a.txt", "a")
+        self.repo.references.create("refs/remotes/origin/b-ahead", main_id)
+
+        # 4. diverged (local and remote have diverged commits)
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("b-diverged-remote", create=True)
+        self.repo_helper.commit("remote commit", "dr.txt", "dr")
+        diverged_remote_id = self.repo.revparse_single("b-diverged-remote").id
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("b-diverged", create=True)
+        self.repo_helper.commit("local rebased", "dl.txt", "dl")
+        self.repo.references.create(
+            "refs/remotes/origin/b-diverged", diverged_remote_id
+        )
+
+        # 5. behind (remote is strictly ahead of local)
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("b-behind", create=True)
+        self.repo_helper.commit("base commit", "bb1.txt", "bb1")
+        behind_local_id = self.repo.revparse_single("b-behind").id
+        self.repo_helper.commit("remote-only commit", "bb2.txt", "bb2")
+        behind_remote_id = self.repo.revparse_single("b-behind").id
+        self.repo.references.create(
+            "refs/heads/b-behind", behind_local_id, force=True
+        )
+        self.repo.references.create(
+            "refs/remotes/origin/b-behind", behind_remote_id
+        )
+
+        parity = check_remote_push_parity(
+            self.repo,
+            ["b-synced", "b-new", "b-ahead", "b-diverged", "b-behind"],
+        )
+        self.assertFalse(parity.is_synced)
+        self.assertEqual(
+            parity.unpushed_branches, ("b-new", "b-ahead", "b-diverged")
+        )
+        self.assertEqual(parity.diverged_branches, ("b-diverged",))
+        self.assertEqual(parity.behind_remote_branches, ("b-behind",))
+
+    def test_check_remote_push_parity_checks_specified_remote_refs(self):
+        """Verifies push parity against a non-origin remote."""
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("b-up", create=True)
+        self.repo_helper.commit("up", "u.txt", "u")
+        up_id = self.repo.revparse_single("b-up").id
+        self.repo.references.create("refs/remotes/upstream/b-up", up_id)
+
+        origin_parity = check_remote_push_parity(
+            self.repo, ["b-up"], remote="origin"
+        )
+        self.assertEqual(origin_parity.unpushed_branches, ("b-up",))
+
+        upstream_parity = check_remote_push_parity(
+            self.repo, ["b-up"], remote="upstream"
+        )
+        self.assertTrue(upstream_parity.is_synced)
 
     def test_sort_branches_bottom_to_top_orders_parents_before_children(self):
         """Tests sorting branches."""
