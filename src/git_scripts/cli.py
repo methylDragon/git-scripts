@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from git_scripts.cmd.evolve import execute_evolve
-from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
+from git_scripts.cmd.gh.pr_aligner import (
     execute_align_pr_bases_and_sync_stacks,
 )
 from git_scripts.cmd.gk_optimize import (
@@ -27,10 +27,17 @@ from git_scripts.cmd.rebase_stack import execute_rebase_stack
 from git_scripts.ui import UI
 
 app = typer.Typer(help="Git Stack Utilities", add_completion=False)
+gh_app = typer.Typer(
+    help="Align GitHub PR bases and synchronize PR stacks",
+    add_completion=False,
+    no_args_is_help=True,
+)
 gk_app = typer.Typer(
     help="Optimize GitKraken Desktop worktree switching and auto-refresh",
     add_completion=False,
+    no_args_is_help=True,
 )
+app.add_typer(gh_app, name="gh")
 app.add_typer(gk_app, name="gk-optimize")
 
 
@@ -344,7 +351,8 @@ def prune_remote_prefix(
     raise typer.Exit(code=0 if success else 1)
 
 
-@app.command("gh-align-pr-bases-and-sync-stacks")
+@gh_app.command("align")
+@app.command("gh-align-pr-bases-and-sync-stacks", hidden=True)
 def gh_align_pr_bases_and_sync_stacks(
     prefix: Annotated[
         str | None,

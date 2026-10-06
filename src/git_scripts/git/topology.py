@@ -127,14 +127,21 @@ class TopologyAnalyzer:
         )
 
 
-def _get_commit_oid(
+def try_revparse(
+    repo: pygit2.Repository, ref_or_branch: str
+) -> pygit2.Object | None:
+    """Resolves a Git revision, returning None if the ref does not exist."""
+    try:
+        return repo.revparse_single(ref_or_branch)
+    except (KeyError, ValueError, TypeError, pygit2.GitError):
+        return None
+
+
+def get_commit_oid(
     repo: pygit2.Repository, ref_or_branch: str
 ) -> pygit2.Oid | None:
     """Resolves a branch or reference name to a pygit2.Oid if valid."""
-    try:
-        obj = repo.revparse_single(ref_or_branch)
-    except (KeyError, ValueError, pygit2.GitError):
-        return None
+    obj = try_revparse(repo, ref_or_branch)
     commit_id = getattr(obj, "id", None)
     return commit_id if isinstance(commit_id, pygit2.Oid) else None
 
@@ -147,11 +154,11 @@ def _is_at_or_behind_stop_ref(
         return False
     if branch == stop_at:
         return True
-    branch_oid = _get_commit_oid(repo, branch)
+    branch_oid = get_commit_oid(repo, branch)
     if branch_oid is None:
         return False
     for ref_name in (stop_at, f"refs/remotes/origin/{stop_at}"):
-        stop_oid = _get_commit_oid(repo, ref_name)
+        stop_oid = get_commit_oid(repo, ref_name)
         if stop_oid is None:
             continue
         if branch_oid == stop_oid:
@@ -168,10 +175,10 @@ def check_remote_trunk_ancestry(
     remote: str = "origin",
 ) -> bool:
     """Checks if the remote target is an ancestor of the bottom branch."""
-    target_oid = _get_commit_oid(
+    target_oid = get_commit_oid(
         repo, f"refs/remotes/{remote}/{target}"
-    ) or _get_commit_oid(repo, target)
-    bottom_oid = _get_commit_oid(repo, bottom_branch)
+    ) or get_commit_oid(repo, target)
+    bottom_oid = get_commit_oid(repo, bottom_branch)
     if target_oid is None or bottom_oid is None:
         return False
     return repo.merge_base(target_oid, bottom_oid) == target_oid
@@ -185,8 +192,8 @@ def check_stack_continuity(
     Returns (True, None) if continuous, or (False, broken_branch_name).
     """
     for b1, b2 in zip(ordered_branches, ordered_branches[1:], strict=False):
-        oid1 = _get_commit_oid(repo, b1)
-        oid2 = _get_commit_oid(repo, b2)
+        oid1 = get_commit_oid(repo, b1)
+        oid2 = get_commit_oid(repo, b2)
         if oid1 is None or oid2 is None or repo.merge_base(oid1, oid2) != oid1:
             return False, b2
 
@@ -197,8 +204,8 @@ def _classify_branch_push_state(
     repo: pygit2.Repository, branch: str, remote: str = "origin"
 ) -> str:
     """Classifies a branch as 'synced', 'unpushed', 'diverged', or 'behind'."""
-    local_oid = _get_commit_oid(repo, branch)
-    remote_oid = _get_commit_oid(repo, f"refs/remotes/{remote}/{branch}")
+    local_oid = get_commit_oid(repo, branch)
+    remote_oid = get_commit_oid(repo, f"refs/remotes/{remote}/{branch}")
     if local_oid is None or remote_oid is None:
         return "unpushed"
     if local_oid == remote_oid:
@@ -300,7 +307,7 @@ def _find_direct_children(
 ) -> list[str]:
     """Finds direct child branches of curr in pool not behind stop_at."""
     effective_pool = set(pool) | ({stop_at} if stop_at else set())
-    curr_oid = _get_commit_oid(repo, curr)
+    curr_oid = get_commit_oid(repo, curr)
     children = []
     for branch in sorted(pool):
         if branch in stack or _is_at_or_behind_stop_ref(repo, branch, stop_at):
@@ -309,7 +316,7 @@ def _find_direct_children(
         if not parent:
             continue
         if parent == curr or (
-            curr_oid is not None and _get_commit_oid(repo, parent) == curr_oid
+            curr_oid is not None and get_commit_oid(repo, parent) == curr_oid
         ):
             children.append(branch)
     return children
@@ -350,7 +357,7 @@ def find_linear_stack(
         distinct_oids = {
             oid
             for b in children
-            if (oid := _get_commit_oid(repo, b)) is not None
+            if (oid := get_commit_oid(repo, b)) is not None
         }
         if len(distinct_oids) > 1 or (not distinct_oids and len(children) > 1):
             break
@@ -389,6 +396,30 @@ def sort_branches_bottom_to_top(
         queue.extend(branch_to_children.get(curr, []))
 
     return ordered
+
+
+def group_into_stacks(
+    repo: pygit2.Repository,
+    branches: set[str],
+    parent_map: dict[str, str | None] | None = None,
+) -> dict[str, list[str]]:
+    """Groups branches into distinct bottom-to-top topological stacks."""
+    if parent_map is None:
+        parent_map = {
+            b: get_parent_branch(repo, b, branches) for b in sorted(branches)
+        }
+    parents = set(parent_map.values()) - {None}
+    tips = [b for b in branches if b not in parents]
+
+    stacks: dict[str, list[str]] = {}
+    for tip in sorted(tips):
+        curr: str | None = tip
+        stack = []
+        while curr and curr in branches:
+            stack.append(curr)
+            curr = parent_map.get(curr)
+        stacks[tip] = stack[::-1]
+    return stacks
 
 
 def sync_colocated_branches(

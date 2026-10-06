@@ -1,392 +1,46 @@
-"""Tests for git-gh-align-pr-bases-and-sync-stacks."""
+"""Unit tests for git gh align command orchestration."""
 
-import os
-import tempfile
 from unittest.mock import MagicMock, patch
 
-import pygit2
 from absl.testing import absltest
 
-from git_scripts.cmd.gh_align_pr_bases_and_sync_stacks import (
-    PrCreateAction,
-    PrEditAction,
-    _compute_pr_metadata,
+from git_scripts.cmd.gh.pr_aligner import (
+    _apply_pr_actions,
     _execute_creates,
     _execute_edits,
-    _get_pr_template,
     _get_selected_branches,
-    _group_into_stacks,
     _print_branch_summary,
     _print_final_summary,
     _prompt_creates,
     _resolve_remote,
     _sync_gh_stack,
     _verify_topology,
-    calculate_pr_actions,
     execute_align_pr_bases_and_sync_stacks,
 )
 from git_scripts.gh.api import GhExecutionError, GitHubPr
+from git_scripts.gh.pr_planner import PrCreateAction, PrEditAction
 from git_scripts.models import RemotePushParityResult
 from git_scripts.ui import UI
 
 
-def _commit_files_to_ref(
-    repo: pygit2.Repository,
-    ref_name: str,
-    message: str,
-    files: dict[str, str],
-    parents: list[pygit2.Oid],
-) -> pygit2.Oid:
-    """Writes nested relative file paths into a commit on ref_name."""
-    sig = pygit2.Signature("Test User", "test@example.com")
-    root_builder = (
-        repo.TreeBuilder(repo[parents[0]].peel(pygit2.Commit).tree)
-        if parents
-        else repo.TreeBuilder()
-    )
-    subdirs: dict[str, dict[str, str]] = {}
-    for path, content in files.items():
-        if "/" in path:
-            top, rest = path.split("/", 1)
-            subdirs.setdefault(top, {})[rest] = content
-        else:
-            blob_oid = repo.create_blob(content.encode("utf-8"))
-            root_builder.insert(path, blob_oid, pygit2.GIT_FILEMODE_BLOB)
-
-    for top, nested_files in subdirs.items():
-        sub_builder = repo.TreeBuilder()
-        for sub_path, content in nested_files.items():
-            blob_oid = repo.create_blob(content.encode("utf-8"))
-            sub_builder.insert(sub_path, blob_oid, pygit2.GIT_FILEMODE_BLOB)
-        root_builder.insert(top, sub_builder.write(), pygit2.GIT_FILEMODE_TREE)
-
-    tree_oid = root_builder.write()
-    return repo.create_commit(ref_name, sig, sig, message, tree_oid, parents)
-
-
-class TestCmdGhAlignPrBasesAndSyncStacks(absltest.TestCase):
-    """Unit tests for PR base alignment and branch selection."""
-
-    def test_calculate_pr_actions_repoints_child_pr_to_ancestor_pr(
-        self,
-    ):
-        """Repoints a child PR to the nearest ancestor with an open PR."""
-        repo = MagicMock(spec=pygit2.Repository)
-        repo.workdir = "/nonexistent"
-        repo.walk.return_value.__iter__.return_value = [
-            MagicMock(message="Title\nDesc")
-        ]
-        branches = {"A", "B", "C", "D"}
-        pr_state = {
-            "A": GitHubPr(
-                headRefName="A",
-                baseRefName="main",
-                url="http://github.com/A",
-                number=1,
-            ),
-            "C": GitHubPr(
-                headRefName="C",
-                baseRefName="B",
-                url="http://github.com/C",
-                number=2,
-            ),
-            "D": GitHubPr(
-                headRefName="D",
-                baseRefName="C",
-                url="http://github.com/D",
-                number=3,
-            ),
-        }
-
-        def fake_get_parent(_r, branch, _candidate_branches):
-            return {"A": None, "B": "A", "C": "B", "D": "C"}.get(branch)
-
-        with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
-            side_effect=fake_get_parent,
-        ):
-            edits, creates = calculate_pr_actions(
-                repo, branches, pr_state, target_trunk="main"
-            )
-
-        self.assertLen(edits, 1)
-        self.assertLen(creates, 1)
-        self.assertEqual(creates[0].branch, "B")
-        self.assertEqual(edits[0].branch, "C")
-        self.assertEqual(edits[0].old_base, "B")
-        self.assertEqual(edits[0].new_base, "A")
-
-    def test_calculate_pr_actions_aligns_forking_tree_branches_to_parent_pr(
-        self,
-    ):
-        """Aligns forked descendant PRs to their nearest ancestor with a PR."""
-        repo = MagicMock(spec=pygit2.Repository)
-        repo.workdir = "/nonexistent"
-        repo.walk.return_value.__iter__.return_value = [
-            MagicMock(message="Title\nDesc")
-        ]
-        branches = {"A", "B", "C", "D", "E"}
-        pr_state = {
-            "A": GitHubPr(
-                headRefName="A", baseRefName="main", url="urlA", number=1
-            ),
-            "B": GitHubPr(
-                headRefName="B", baseRefName="main", url="urlB", number=2
-            ),
-            "D": GitHubPr(
-                headRefName="D", baseRefName="main", url="urlD", number=3
-            ),
-            "E": GitHubPr(
-                headRefName="E", baseRefName="main", url="urlE", number=4
-            ),
-        }
-
-        def fake_get_parent(_r, branch, _candidate_branches):
-            return {"A": None, "B": "A", "C": "A", "D": "C", "E": "A"}.get(
-                branch
-            )
-
-        with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
-            side_effect=fake_get_parent,
-        ):
-            edits, creates = calculate_pr_actions(
-                repo, branches, pr_state, target_trunk="main"
-            )
-
-        self.assertLen(edits, 3)
-        self.assertLen(creates, 1)
-        self.assertEqual(creates[0].branch, "C")
-
-        actions_dict = {a.branch: a.new_base for a in edits}
-        self.assertEqual(actions_dict, {"B": "A", "D": "A", "E": "A"})
-
-    def test_calculate_pr_actions_targets_new_pr_when_create_missing_set(self):
-        """Points child PRs at newly created parent PRs when create_missing."""
-        repo = MagicMock(spec=pygit2.Repository)
-        repo.workdir = "/nonexistent"
-        repo.walk.return_value.__iter__.return_value = [
-            MagicMock(message="Title\nDesc")
-        ]
-        branches = {"A", "B", "C"}
-        pr_state = {
-            "A": GitHubPr(
-                headRefName="A", baseRefName="main", url="urlA", number=1
-            ),
-            "C": GitHubPr(
-                headRefName="C", baseRefName="main", url="urlC", number=2
-            ),
-        }
-
-        def fake_get_parent(_r, branch, _candidate_branches):
-            return {"A": None, "B": "A", "C": "B"}.get(branch)
-
-        with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
-            side_effect=fake_get_parent,
-        ):
-            edits, creates = calculate_pr_actions(
-                repo,
-                branches,
-                pr_state,
-                target_trunk="main",
-                create_missing=True,
-            )
-
-        self.assertLen(edits, 1)
-        self.assertLen(creates, 1)
-        self.assertEqual(edits[0].branch, "C")
-        self.assertEqual(edits[0].new_base, "B")
-        self.assertEqual(creates[0].branch, "B")
-        self.assertEqual(creates[0].base, "A")
-        self.assertEqual(creates[0].title, "Title")
-
-    def test_get_pr_template_matches_case_insensitive_docs_and_subdir_paths(
-        self,
-    ):
-        """Finds PR templates across mixed-case, docs/, and subdir paths."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            gh_dir = os.path.join(tmpdir, ".github")
-            os.makedirs(gh_dir)
-            mixed_path = os.path.join(gh_dir, "Pull_Request_Template.md")
-            with open(mixed_path, "w", encoding="utf-8") as f:
-                f.write("## Mixed Case Checklist")
-            self.assertEqual(
-                _get_pr_template(tmpdir), "## Mixed Case Checklist"
-            )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            docs_dir = os.path.join(tmpdir, "docs")
-            os.makedirs(docs_dir)
-            docs_tpl = os.path.join(docs_dir, "pull_request_template.md")
-            with open(docs_tpl, "w", encoding="utf-8") as f:
-                f.write("## Docs Template")
-            self.assertEqual(_get_pr_template(tmpdir), "## Docs Template")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            subdir = os.path.join(tmpdir, ".github", "PULL_REQUEST_TEMPLATE")
-            os.makedirs(subdir)
-            single_tpl = os.path.join(subdir, "custom.md")
-            with open(single_tpl, "w", encoding="utf-8") as f:
-                f.write("## Single Subdir Template")
-            self.assertEqual(
-                _get_pr_template(tmpdir), "## Single Subdir Template"
-            )
-
-            second_tpl = os.path.join(subdir, "other.md")
-            with open(second_tpl, "w", encoding="utf-8") as f:
-                f.write("## Second Subdir Template")
-            self.assertEqual(_get_pr_template(tmpdir), "")
-
-            default_tpl = os.path.join(subdir, "default.md")
-            with open(default_tpl, "w", encoding="utf-8") as f:
-                f.write("## Subdir Default Template")
-            self.assertEqual(
-                _get_pr_template(tmpdir), "## Subdir Default Template"
-            )
-
-    def test_get_pr_template_reads_from_git_commit_tree_when_missing_on_disk(
-        self,
-    ):
-        """Reads the PR template from Git commit trees when absent on disk."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = pygit2.init_repository(tmpdir)
-            _commit_files_to_ref(
-                repo,
-                "refs/remotes/origin/main",
-                "Initial commit with template",
-                {".github/PULL_REQUEST_TEMPLATE.md": "## Committed Template"},
-                parents=[],
-            )
-            _commit_files_to_ref(
-                repo,
-                "refs/remotes/origin/subdir-tpl",
-                "Subdir template commit",
-                {"PULL_REQUEST_TEMPLATE/custom.md": "## Tree Subdir Template"},
-                parents=[],
-            )
-            self.assertEqual(
-                _get_pr_template(
-                    tmpdir,
-                    repo=repo,
-                    ref_names=("refs/remotes/origin/main",),
-                ),
-                "## Committed Template",
-            )
-            self.assertEqual(
-                _get_pr_template(
-                    tmpdir,
-                    repo=repo,
-                    ref_names=("refs/remotes/origin/subdir-tpl",),
-                ),
-                "## Tree Subdir Template",
-            )
-
-    def test_calculate_pr_actions_uses_remote_trunk_when_local_trunk_is_stale(
-        self,
-    ):
-        """Combines single-commit body and PR template even when main lags."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = pygit2.init_repository(tmpdir)
-            c1 = _commit_files_to_ref(
-                repo,
-                "refs/heads/main",
-                "Initial main commit",
-                {".github/pull_request_template.md": "## PR Checklist"},
-                parents=[],
-            )
-            c2 = _commit_files_to_ref(
-                repo,
-                "refs/remotes/origin/main",
-                "Upstream commit 1",
-                {"a.txt": "1"},
-                parents=[c1],
-            )
-            c3 = _commit_files_to_ref(
-                repo,
-                "refs/remotes/origin/main",
-                "Upstream commit 2",
-                {"b.txt": "2"},
-                parents=[c2],
-            )
-            _commit_files_to_ref(
-                repo,
-                "refs/heads/feat/stack-1",
-                "Add widget\n\nWhy: Needed for dashboard.",
-                {"widget.py": "x = 1\n"},
-                parents=[c3],
-            )
-
-            edits, creates = calculate_pr_actions(
-                repo,
-                {"feat/stack-1"},
-                {},
-                target_trunk="main",
-                create_missing=True,
-                parent_map={"feat/stack-1": None},
-                remote="origin",
-            )
-
-            self.assertEmpty(edits)
-            self.assertLen(creates, 1)
-            self.assertEqual(creates[0].title, "Add widget")
-            self.assertEqual(
-                creates[0].description,
-                "Why: Needed for dashboard.\n\n## PR Checklist",
-            )
-
-    def test_compute_pr_metadata_resolves_remote_trunk_without_local_trunk(
-        self,
-    ):
-        """Resolves refs/remotes/<remote>/<base> when local base is absent."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = pygit2.init_repository(tmpdir)
-            c1 = _commit_files_to_ref(
-                repo,
-                "refs/remotes/upstream/main",
-                "Upstream base",
-                {"README.md": "hi"},
-                parents=[],
-            )
-            _commit_files_to_ref(
-                repo,
-                "refs/heads/feat/item",
-                "Fix parser\n\nHandles empty tokens.",
-                {"parser.py": "pass\n"},
-                parents=[c1],
-            )
-
-            title, desc = _compute_pr_metadata(
-                repo,
-                "feat/item",
-                "main",
-                "## Template Footer",
-                remote="upstream",
-            )
-            self.assertEqual(title, "Fix parser")
-            self.assertEqual(
-                desc, "Handles empty tokens.\n\n## Template Footer"
-            )
+class TestCmdGhAlign(absltest.TestCase):
+    """Tests branch selection, topology validation, and PR alignment."""
 
     def test_execute_align_pr_bases_returns_false_when_gh_cli_is_not_installed(
         self,
     ):
         """Returns False when the gh CLI is unavailable."""
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_"
-            "installed",
+            "git_scripts.cmd.gh.pr_aligner.check_gh_installed",
             return_value=False,
         ):
             self.assertFalse(
                 execute_align_pr_bases_and_sync_stacks(".", ui=MagicMock())
             )
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_installed",
+        "git_scripts.cmd.gh.pr_aligner.check_gh_installed",
         return_value=True,
     )
     def test_execute_align_pr_bases_returns_true_when_no_branches_are_selected(
@@ -403,9 +57,9 @@ class TestCmdGhAlignPrBasesAndSyncStacks(absltest.TestCase):
             execute_align_pr_bases_and_sync_stacks(".", prefix="feat/", ui=ui)
         )
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_gh_installed",
+        "git_scripts.cmd.gh.pr_aligner.check_gh_installed",
         return_value=True,
     )
     def test_execute_align_pr_bases_returns_false_when_head_is_on_target(
@@ -428,8 +82,7 @@ class TestCmdGhAlignPrBasesAndSyncStacks(absltest.TestCase):
 
         ui = UI(plain=True, auto_yes=True)
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.find_linear_"
-            "stack",
+            "git_scripts.cmd.gh.pr_aligner.find_linear_stack",
             return_value={"prefix-1"},
         ) as mock_find_stack:
             res = _get_selected_branches(
@@ -460,8 +113,7 @@ class TestCmdGhAlignPrBasesAndSyncStacks(absltest.TestCase):
 
         ui = UI(plain=True, auto_yes=True)
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.find_linear_"
-            "stack",
+            "git_scripts.cmd.gh.pr_aligner.find_linear_stack",
             return_value={"feat/stack-1"},
         ) as mock_find_stack:
             res = _get_selected_branches(
@@ -481,7 +133,7 @@ class TestCmdGhAlignPrBasesAndSyncStacks(absltest.TestCase):
             stop_at="main",
         )
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
     def test_execute_align_pr_bases_prompts_checkbox_in_interactive_mode(
         self, mock_repo
     ):
@@ -500,74 +152,50 @@ class TestCmdGhAlignPrBasesAndSyncStacks(absltest.TestCase):
         repo.head.shorthand = "b2"
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
-            side_effect=lambda _r, b, _cand: (
-                "b1" if b == "b2" else ("main" if b == "b1" else None)
-            ),
+            "git_scripts.cmd.gh.pr_aligner.group_into_stacks",
+            return_value={"b2": ["b1", "b2"]},
         ):
             with patch(
-                "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_"
-                "remote_trunk_ancestry",
-                return_value=False,
+                "git_scripts.cmd.gh.pr_aligner.get_parent_branch",
+                side_effect=lambda _r, b, _cand: (
+                    "b1" if b == "b2" else ("main" if b == "b1" else None)
+                ),
             ):
                 with patch(
-                    "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_"
-                    "gh_installed",
-                    return_value=True,
+                    "git_scripts.cmd.gh.pr_aligner.check_remote_trunk_ancestry",
+                    return_value=False,
                 ):
-                    result = execute_align_pr_bases_and_sync_stacks(
-                        ".", interactive=True, ui=ui
-                    )
-                    self.assertFalse(result)
-                    ui.ask_checkbox.assert_called_once()
-                    _, kwargs = ui.ask_checkbox.call_args
-                    self.assertIn("choices", kwargs)
-
-    def test_group_into_stacks_maps_each_stack_tip_to_ordered_branch_chain(
-        self,
-    ):
-        """Groups branches into bottom-to-top chains keyed by stack tip."""
-        repo = MagicMock()
-
-        def fake_get_parent(_r, b, _pool):
-            return {"b1": "main", "b2": "b1", "c1": "main"}.get(b)
-
-        with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
-            side_effect=fake_get_parent,
-        ):
-            stacks = _group_into_stacks(repo, {"b1", "b2", "c1"})
-            self.assertIn("b2", stacks)
-            self.assertIn("c1", stacks)
-            self.assertNotIn("b1", stacks)
-            self.assertEqual(stacks["b2"], ["b1", "b2"])
-            self.assertEqual(stacks["c1"], ["c1"])
+                    with patch(
+                        "git_scripts.cmd.gh.pr_aligner.check_gh_installed",
+                        return_value=True,
+                    ):
+                        result = execute_align_pr_bases_and_sync_stacks(
+                            ".", interactive=True, ui=ui
+                        )
+                        self.assertFalse(result)
+                        ui.ask_checkbox.assert_called_once()
+                        _, kwargs = ui.ask_checkbox.call_args
+                        self.assertIn("choices", kwargs)
 
 
-class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
-    """Tests for topology verification, push prompts, and stack syncing."""
+class TestCmdGhAlignTopologyAndStackSync(absltest.TestCase):
+    """Tests topology verification, push prompts, and stack syncing."""
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.push_branches")
+    @patch("git_scripts.cmd.gh.pr_aligner.push_branches")
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.resolve_branches_to_"
-        "push",
+        "git_scripts.cmd.gh.pr_aligner.resolve_branches_to_push",
         return_value=["b1", "b2"],
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_"
-        "parity",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_push_parity",
         return_value=RemotePushParityResult(unpushed_branches=("b1", "b2")),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_stack_"
-        "continuity",
+        "git_scripts.cmd.gh.pr_aligner.check_stack_continuity",
         return_value=(True, None),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_trunk_"
-        "ancestry",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_trunk_ancestry",
         return_value=True,
     )
     def test_verify_topology_prompts_and_pushes_unpushed_branches(
@@ -585,16 +213,16 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         ui.pluralize.return_value = "2 unpushed branches"
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
+            "git_scripts.cmd.gh.pr_aligner.get_parent_branch",
             side_effect=lambda _r, b, _cand: "b1" if b == "b2" else None,
         ):
-            ok, ordered, _ = _verify_topology(
+            ok, ordered, _, stacks = _verify_topology(
                 repo, {"b1", "b2"}, "main", ui, repo_path="/repo"
             )
 
         self.assertTrue(ok)
         self.assertEqual(ordered, ["b1", "b2"])
+        self.assertEqual(stacks, {"b2": ["b1", "b2"]})
         mock_resolve_push.assert_called_once()
         mock_push.assert_called_once_with(
             branches=["b1", "b2"],
@@ -603,27 +231,23 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             remote="origin",
         )
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.push_branches")
+    @patch("git_scripts.cmd.gh.pr_aligner.push_branches")
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.resolve_branches_to_"
-        "push",
+        "git_scripts.cmd.gh.pr_aligner.resolve_branches_to_push",
         return_value=["b1", "b2"],
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_"
-        "parity",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_push_parity",
         return_value=RemotePushParityResult(
             unpushed_branches=("b1", "b2"), diverged_branches=("b1",)
         ),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_stack_"
-        "continuity",
+        "git_scripts.cmd.gh.pr_aligner.check_stack_continuity",
         return_value=(True, None),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_trunk_"
-        "ancestry",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_trunk_ancestry",
         return_value=True,
     )
     def test_verify_topology_uses_force_with_lease_when_stack_branch_diverged(
@@ -641,11 +265,10 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         ui.pluralize.return_value = "2 unpushed branches"
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
+            "git_scripts.cmd.gh.pr_aligner.get_parent_branch",
             side_effect=lambda _r, b, _cand: "b1" if b == "b2" else None,
         ):
-            ok, ordered, _ = _verify_topology(
+            ok, ordered, _, _ = _verify_topology(
                 repo, {"b1", "b2"}, "main", ui, repo_path="/repo"
             )
 
@@ -658,25 +281,21 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             remote="origin",
         )
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.push_branches")
+    @patch("git_scripts.cmd.gh.pr_aligner.push_branches")
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.resolve_branches_to_"
-        "push",
+        "git_scripts.cmd.gh.pr_aligner.resolve_branches_to_push",
         return_value=["b1"],
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_"
-        "parity",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_push_parity",
         return_value=RemotePushParityResult(unpushed_branches=("b1", "b2")),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_stack_"
-        "continuity",
+        "git_scripts.cmd.gh.pr_aligner.check_stack_continuity",
         return_value=(True, None),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_trunk_"
-        "ancestry",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_trunk_ancestry",
         return_value=True,
     )
     def test_verify_topology_aborts_when_user_skips_pushing_any_stack_branch(
@@ -694,11 +313,10 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         ui.pluralize.return_value = "2 unpushed branches"
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
+            "git_scripts.cmd.gh.pr_aligner.get_parent_branch",
             side_effect=lambda _r, b, _cand: "b1" if b == "b2" else None,
         ):
-            ok, ordered, _ = _verify_topology(
+            ok, ordered, _, _ = _verify_topology(
                 repo, {"b1", "b2"}, "main", ui, repo_path="/repo"
             )
 
@@ -708,20 +326,17 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             branches=["b1"], options=[], repo_path="/repo", remote="origin"
         )
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.push_branches")
+    @patch("git_scripts.cmd.gh.pr_aligner.push_branches")
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_"
-        "parity",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_push_parity",
         return_value=RemotePushParityResult(behind_remote_branches=("b1",)),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_stack_"
-        "continuity",
+        "git_scripts.cmd.gh.pr_aligner.check_stack_continuity",
         return_value=(True, None),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_trunk_"
-        "ancestry",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_trunk_ancestry",
         return_value=True,
     )
     def test_verify_topology_aborts_when_local_branch_is_behind_remote(
@@ -732,11 +347,10 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         ui = MagicMock()
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
+            "git_scripts.cmd.gh.pr_aligner.get_parent_branch",
             return_value=None,
         ):
-            ok, ordered, _ = _verify_topology(
+            ok, ordered, _, _ = _verify_topology(
                 repo, {"b1"}, "main", ui, repo_path="/repo"
             )
 
@@ -745,18 +359,15 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         mock_push.assert_not_called()
 
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_push_"
-        "parity",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_push_parity",
         return_value=RemotePushParityResult(),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_stack_"
-        "continuity",
+        "git_scripts.cmd.gh.pr_aligner.check_stack_continuity",
         return_value=(True, None),
     )
     @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.check_remote_trunk_"
-        "ancestry",
+        "git_scripts.cmd.gh.pr_aligner.check_remote_trunk_ancestry",
         return_value=True,
     )
     def test_verify_topology_validates_multiple_disjoint_stacks_independently(
@@ -770,16 +381,16 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             return {"b1": None, "b2": "b1", "c1": None, "c2": "c1"}.get(b)
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_parent_"
-            "branch",
+            "git_scripts.cmd.gh.pr_aligner.get_parent_branch",
             side_effect=fake_get_parent,
         ):
-            ok, ordered, _ = _verify_topology(
+            ok, ordered, _, stacks = _verify_topology(
                 repo, {"b1", "b2", "c1", "c2"}, "main", ui
             )
 
         self.assertTrue(ok)
         self.assertIsNotNone(ordered)
+        self.assertEqual(stacks, {"b2": ["b1", "b2"], "c2": ["c1", "c2"]})
         self.assertEqual(mock_cont.call_count, 2)
         mock_cont.assert_any_call(repo, ["b1", "b2"])
         mock_cont.assert_any_call(repo, ["c1", "c2"])
@@ -817,14 +428,12 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         """Executes gh_pr_edit and returns False if a GitHub CLI call fails."""
         ui = MagicMock()
         edits = [PrEditAction("b1", "old", "new", "reason", "url")]
-        with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_pr_edit"
-        ) as mock_edit:
+        with patch("git_scripts.cmd.gh.pr_aligner.gh_pr_edit") as mock_edit:
             self.assertTrue(_execute_edits(edits, ".", ui))
             mock_edit.assert_called_once()
 
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_pr_edit",
+            "git_scripts.cmd.gh.pr_aligner.gh_pr_edit",
             side_effect=GhExecutionError("err"),
         ):
             self.assertFalse(_execute_edits(edits, ".", ui))
@@ -834,10 +443,58 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         ui = MagicMock()
         creates = [PrCreateAction("b1", "main", "T", "D")]
         with patch(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_pr_create"
+            "git_scripts.cmd.gh.pr_aligner.gh_pr_create",
+            return_value="https://github.com/org/repo/pull/99",
         ) as mock_create:
             self.assertTrue(_execute_creates(creates, ".", ui))
-            mock_create.assert_called_once()
+            mock_create.assert_called_once_with(
+                ".", "b1", "main", title="T", body="D"
+            )
+            self.assertEqual(
+                creates[0].url, "https://github.com/org/repo/pull/99"
+            )
+
+    def test_apply_pr_actions_creates_before_edits_and_reconciles_skipped_pr(
+        self,
+    ):
+        """Creates PRs before editing bases and falls back on skipped PRs."""
+        ui = MagicMock()
+        ui.auto_yes = True
+        call_order: list[str] = []
+
+        pr_state = {
+            "A": GitHubPr(
+                headRefName="A", baseRefName="main", url="url/1", number=1
+            ),
+            "C": GitHubPr(
+                headRefName="C", baseRefName="main", url="url/3", number=3
+            ),
+        }
+        edits = [
+            PrEditAction("C", "main", "B", "Matches local topology", "url/3")
+        ]
+        # User deselected B in _prompt_creates (creates = []).
+        with patch(
+            "git_scripts.cmd.gh.pr_aligner.gh_pr_edit",
+            side_effect=lambda _p, br, base, _num: call_order.append(
+                f"edit:{br}->{base}"
+            ),
+        ):
+            cancelled, ok, final_edits = _apply_pr_actions(
+                edits,
+                [],
+                pr_state,
+                ".",
+                ui,
+                planned_create_branches={"B"},
+                parent_map={"A": None, "B": "A", "C": "B"},
+                target_trunk="main",
+            )
+
+        self.assertFalse(cancelled)
+        self.assertTrue(ok)
+        self.assertEqual(call_order, ["edit:C->A"])
+        self.assertEqual(final_edits[0].new_base, "A")
 
     def test_print_final_summary_displays_edited_created_and_skipped_prs(self):
         """Renders edited, created, and skipped PRs in the final summary."""
@@ -857,14 +514,10 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         self.assertIn("b1", str(panel.renderable))
         self.assertIn("skipped", str(panel.renderable))
 
-    @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_checkout"
-    )
-    @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_unstack"
-    )
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_link")
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_checkout")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_unstack")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_link")
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
     def test_execute_align_pr_bases_links_stack_after_aligning_prs(
         self,
         mock_repo,
@@ -889,7 +542,7 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         mock_parity = MagicMock(return_value=RemotePushParityResult())
         mock_ancestry = MagicMock(return_value=True)
         with patch.multiple(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks",
+            "git_scripts.cmd.gh.pr_aligner",
             check_gh_installed=MagicMock(return_value=True),
             check_gh_stack_installed=MagicMock(return_value=True),
             check_remote_push_parity=mock_parity,
@@ -929,10 +582,8 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
                 ".", ["b1", "b2"], remote="upstream"
             )
 
-    @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_checkout"
-    )
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_checkout")
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
     def test_execute_align_pr_bases_returns_false_when_gh_stack_link_fails(
         self,
         mock_repo,
@@ -949,7 +600,7 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             PrCreateAction("b2", "b1", "T", "D"),
         ]
         with patch.multiple(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks",
+            "git_scripts.cmd.gh.pr_aligner",
             check_gh_installed=MagicMock(return_value=True),
             check_gh_stack_installed=MagicMock(return_value=True),
             check_remote_push_parity=MagicMock(
@@ -983,8 +634,8 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             )
             mock_checkout.assert_called_once_with(".", "1")
 
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_link")
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.get_repo")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_link")
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
     def test_execute_align_pr_bases_skips_linking_without_gh_stack(
         self,
         mock_repo,
@@ -1002,7 +653,7 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             PrCreateAction("b2", "b1", "T", "D"),
         ]
         with patch.multiple(
-            "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks",
+            "git_scripts.cmd.gh.pr_aligner",
             check_gh_installed=MagicMock(return_value=True),
             check_gh_stack_installed=MagicMock(return_value=False),
             check_remote_push_parity=MagicMock(
@@ -1015,13 +666,12 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
             calculate_pr_actions=MagicMock(return_value=([], creates)),
             gh_pr_create=MagicMock(return_value="url/1"),
         ):
-            with patch("time.sleep"):
-                self.assertTrue(
-                    execute_align_pr_bases_and_sync_stacks(
-                        ".", ui=ui, create_missing=True
-                    )
+            self.assertTrue(
+                execute_align_pr_bases_and_sync_stacks(
+                    ".", ui=ui, create_missing=True
                 )
-                mock_link.assert_not_called()
+            )
+            mock_link.assert_not_called()
 
     def test_resolve_remote_single_remote_auto_selected(self):
         """Auto-selects the single configured remote without prompting."""
@@ -1098,10 +748,8 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         self.assertEqual(_resolve_remote(repo, "origin", ui), (True, "origin"))
         self.assertEqual(_resolve_remote(repo, "missing", ui), (False, None))
 
-    @patch(
-        "git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_unstack"
-    )
-    @patch("git_scripts.cmd.gh_align_pr_bases_and_sync_stacks.gh_stack_link")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_unstack")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_link")
     def test_sync_gh_stack_deduplicates_failed_to_link_stack_prefix(
         self, mock_link, _mock_unstack
     ):
@@ -1133,6 +781,88 @@ class TestCmdGhAlignPrBasesTopologyAndStackSync(absltest.TestCase):
         self.assertNotIn(
             "Failed to link stack: Failed to link stack:", printed
         )
+
+    @patch("git_scripts.cmd.gh.pr_aligner.run_cmd")
+    @patch("git_scripts.cmd.gh.pr_aligner._get_checked_out_branch")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_checkout")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_unstack")
+    @patch("git_scripts.cmd.gh.pr_aligner.gh_stack_link")
+    def test_sync_gh_stack_restores_checked_out_branch_after_checkout(
+        self,
+        _mock_link,
+        _mock_unstack,
+        _mock_checkout,
+        mock_get_branch,
+        mock_run_cmd,
+    ):
+        """Restores original HEAD branch when gh stack checkout moves HEAD."""
+        ui = MagicMock()
+        ui.auto_yes = True
+        mock_get_branch.side_effect = ["b2", "b1"]
+
+        ok = _sync_gh_stack(
+            "/repo",
+            ["b1", "b2"],
+            {
+                "b1": GitHubPr(
+                    headRefName="b1", baseRefName="main", url="url/1", number=1
+                )
+            },
+            {"b1": "main", "b2": "b1"},
+            "main",
+            ui,
+        )
+        self.assertTrue(ok)
+        mock_run_cmd.assert_called_once_with(
+            ["git", "checkout", "b2"], cwd="/repo", check=False
+        )
+
+    @patch("git_scripts.cmd.gh.pr_aligner.get_repo")
+    def test_execute_align_interactive_plans_edits_for_missing_parents(
+        self,
+        mock_repo,
+    ):
+        """Interactive mode plans child PR edits against missing parent PRs."""
+        ui = MagicMock()
+        ui.auto_yes = False
+        ui.confirm.return_value = True
+        ui.ask_choice.return_value = "Create all 1 draft PRs"
+        repo = MagicMock()
+        repo.references = ["refs/heads/b1", "refs/heads/b2"]
+        repo.head.shorthand = "b2"
+        mock_repo.return_value = repo
+        mock_calc = MagicMock(
+            return_value=(
+                [PrEditAction("b2", "main", "b1", "reason", "url/2", "2")],
+                [PrCreateAction("b1", "main", "T", "D")],
+            )
+        )
+        with patch.multiple(
+            "git_scripts.cmd.gh.pr_aligner",
+            check_gh_installed=MagicMock(return_value=True),
+            check_gh_stack_installed=MagicMock(return_value=False),
+            check_remote_push_parity=MagicMock(
+                return_value=RemotePushParityResult()
+            ),
+            check_stack_continuity=MagicMock(return_value=(True, "")),
+            check_remote_trunk_ancestry=MagicMock(return_value=True),
+            find_linear_stack=MagicMock(return_value={"b1", "b2"}),
+            get_open_prs=MagicMock(
+                return_value={
+                    "b2": GitHubPr(
+                        headRefName="b2",
+                        baseRefName="main",
+                        url="url/2",
+                        number=2,
+                    )
+                }
+            ),
+            calculate_pr_actions=mock_calc,
+            gh_pr_create=MagicMock(return_value="url/1"),
+            gh_pr_edit=MagicMock(),
+        ):
+            self.assertTrue(execute_align_pr_bases_and_sync_stacks(".", ui=ui))
+            self.assertTrue(mock_calc.call_args.kwargs["create_missing"])
 
 
 if __name__ == "__main__":

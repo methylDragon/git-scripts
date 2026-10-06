@@ -8,6 +8,7 @@ from git_scripts.git.topology import (
     TopologyAnalyzer,
     check_remote_push_parity,
     find_linear_stack,
+    group_into_stacks,
     sort_branches_bottom_to_top,
 )
 from tests.helpers import GitTestRepo
@@ -231,6 +232,27 @@ class TestTopologyAnalyzer(absltest.TestCase):
         }
         ordered = sort_branches_bottom_to_top({"b1", "b2", "b3"}, parent_map)
         self.assertEqual(ordered, ["b1", "b2", "b3"])
+
+    def test_group_into_stacks_maps_each_stack_tip_to_ordered_branch_chain(
+        self,
+    ):
+        """Groups branches into bottom-to-top chains keyed by stack tip."""
+
+        repo = MagicMock()
+
+        def fake_get_parent(_r, b, _pool):
+            return {"b1": "main", "b2": "b1", "c1": "main"}.get(b)
+
+        with patch(
+            "git_scripts.git.topology.get_parent_branch",
+            side_effect=fake_get_parent,
+        ):
+            stacks = group_into_stacks(repo, {"b1", "b2", "c1"})
+            self.assertIn("b2", stacks)
+            self.assertIn("c1", stacks)
+            self.assertNotIn("b1", stacks)
+            self.assertEqual(stacks["b2"], ["b1", "b2"])
+            self.assertEqual(stacks["c1"], ["c1"])
 
 
 if __name__ == "__main__":

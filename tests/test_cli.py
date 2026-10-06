@@ -107,6 +107,26 @@ class TestCli(absltest.TestCase):
         "sys.argv",
         [
             "git-scripts",
+            "gh",
+            "align",
+            "--remote",
+            "upstream",
+        ],
+    )
+    @mock.patch("git_scripts.cli.execute_align_pr_bases_and_sync_stacks")
+    def test_main_routes_to_gh_align_subcommand_when_invoked(self, mock_exec):
+        mock_exec.return_value = True
+        try:
+            main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        mock_exec.assert_called_once()
+        self.assertEqual(mock_exec.call_args.kwargs["remote"], "upstream")
+
+    @mock.patch(
+        "sys.argv",
+        [
+            "git-scripts",
             "gh-align-pr-bases-and-sync-stacks",
             "--remote",
             "upstream",
