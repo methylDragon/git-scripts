@@ -1,11 +1,16 @@
-"""Core logic for orchestrating single-branch rebases."""
+"""Core logic for orchestrating single-branch and batch rebases."""
 
 import pygit2
 from rich.console import Group
 from rich.panel import Panel
 from rich.progress import Progress
 
-from git_scripts.cmd.shared import get_ui_worktree_callbacks
+from git_scripts.cmd.shared import (
+    get_ui_worktree_callbacks,
+)
+from git_scripts.cmd.shared import (
+    prompt_and_push_updated_branches as _prompt_and_push,
+)
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
@@ -14,6 +19,7 @@ from git_scripts.git.reads import (
 )
 from git_scripts.git.rebase import rebase_abort, rebase_continue
 from git_scripts.git.rebase_plan import create_rebase_plan, execute_rebase_plan
+from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import TopologyAnalyzer, sync_colocated_branches
 from git_scripts.git.worktrees import (
     is_in_another_worktree,
@@ -514,3 +520,15 @@ def prompt_and_delete_merged(
             )
         except GitExecutionError:
             pass
+
+
+def prompt_and_push_updated_branches(
+    branches_to_keep: set[str] | list[str], repo_path: str, ui: UI
+) -> None:
+    """Displays updated branches and prompts to push with force-with-lease."""
+    _prompt_and_push(
+        branches_to_keep,
+        repo_path,
+        ui,
+        push_fn=push_branches,
+    )

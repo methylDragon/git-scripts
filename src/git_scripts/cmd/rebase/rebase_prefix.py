@@ -1,23 +1,24 @@
-"""Core logic for the git-rebase-prefix command."""
+"""Core logic for the git prefix rebase (git-rebase-prefix) command."""
 
 import time
 
 import pygit2
-from rich.panel import Panel
 
-from git_scripts.cmd.rebase_orchestrator import (
+from git_scripts.cmd.rebase.rebase_orchestrator import (
     print_batch_summary,
     prompt_and_delete_merged,
+    prompt_and_push_updated_branches,
     rebase_loop,
 )
-from git_scripts.cmd.shared import resolve_branches_to_push, ui_update_target
+from git_scripts.cmd.shared import ui_update_target
 from git_scripts.git.core import GitExecutionError, run_cmd
-from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import TopologyAnalyzer
 from git_scripts.ui import UI
 
 
-def _find_matching_branches(repo, prefix: str, target: str) -> list[str]:
+def _find_matching_branches(
+    repo: pygit2.Repository, prefix: str, target: str
+) -> list[str]:
     """Finds all local branches matching the prefix."""
     all_branches = []
     for ref in repo.references:
@@ -106,34 +107,8 @@ def execute_rebase_prefix(
 
     _restore_branch(repo_path, start_branch)
 
-    if batch_result.branches_to_keep:
-        branches_list = list(batch_result.branches_to_keep)
-        ui.print()
-        ui.print(
-            Panel(
-                "\n".join(f"  - [yellow]{b}[/yellow]" for b in branches_list),
-                title=(
-                    f"[bold cyan]Local branches updated "
-                    f"({len(batch_result.branches_to_keep)})[/bold cyan]"
-                ),
-                border_style="cyan",
-                expand=False,
-            )
-        )
-        resolved_branches = resolve_branches_to_push(
-            branches=branches_list,
-            ui=ui,
-            prompt_title="Push {} to origin?".format(
-                ui.pluralize(
-                    len(batch_result.branches_to_keep), "updated branch"
-                )
-            ),
-        )
-        if resolved_branches:
-            push_branches(
-                branches=resolved_branches,
-                options=["--force-with-lease"],
-                repo_path=repo_path,
-            )
+    prompt_and_push_updated_branches(
+        batch_result.branches_to_keep, repo_path, ui
+    )
 
     return len(batch_result.failed_log) == 0

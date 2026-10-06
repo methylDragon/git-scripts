@@ -17,7 +17,7 @@ This file is specifically for AI agents (like Roo, Claude, etc.) operating in th
 
 ## 3. Critical Safety Guardrails
 
-- **Git Pruning:** The concept of "pruning" in this repository implies safe garbage collection. If you are asked to modify a prune command (like `git-prune-remote-prefix`), **never short-circuit the obsolescence check**.
+- **Git Pruning:** The concept of "pruning" in this repository implies safe garbage collection. If you are asked to modify a prune command (like `git cleanup branches local|remote`, `git prefix prune`, or `git-prune-remote-prefix`), **never short-circuit the obsolescence check**.
   - Even if aggressive flags like `--also-prune-no-local` are passed, the tool must verify obsolescence.
   - Unmerged branches must ALWAYS be bucketed separately and presented to the user with a high-visibility warning prompt. Silent deletion of unmerged remote branches is a catastrophic anti-pattern.
 - **Cross-Worktree Operations:** Git locks branches checked out in other worktrees. If modifying batch branch operations (like batch rebase), you must use the `manage_worktrees` context manager to safely detach those branches before operating on them, and reattach them afterward.

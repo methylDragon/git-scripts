@@ -3,7 +3,7 @@ from unittest import mock
 import pygit2
 from absl.testing import absltest
 
-from git_scripts.cmd.push_prefix import execute_push_prefix
+from git_scripts.cmd.push.push_prefix import execute_push_prefix
 from git_scripts.ui import UI
 from tests.helpers import GitTestRepo
 
@@ -31,8 +31,8 @@ class TestCmdPushPrefix(absltest.TestCase):
         main_id = self.repo.revparse_single("main").id
         self.repo.references.create("refs/remotes/origin/feat/2", main_id)
 
-    @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_prefix.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_prefix.push_branches")
     def test_execute_push_prefix_skips_up_to_date_branches(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -52,8 +52,8 @@ class TestCmdPushPrefix(absltest.TestCase):
         )
         mock_run_cmd.assert_called_once()  # For the git fetch
 
-    @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_prefix.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_prefix.push_branches")
     def test_execute_push_prefix_does_nothing_if_all_up_to_date(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -66,8 +66,8 @@ class TestCmdPushPrefix(absltest.TestCase):
         self.assertTrue(result)
         mock_push_branches.assert_not_called()
 
-    @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_prefix.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_prefix.push_branches")
     def test_execute_push_prefix_returns_false_if_push_fails(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -81,8 +81,8 @@ class TestCmdPushPrefix(absltest.TestCase):
 
         self.assertFalse(result)
 
-    @mock.patch("git_scripts.cmd.push_prefix.run_cmd")
-    @mock.patch("git_scripts.cmd.push_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_prefix.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_prefix.push_branches")
     def test_execute_push_prefix_pushes_new_branch(
         self, mock_push_branches, mock_run_cmd
     ):

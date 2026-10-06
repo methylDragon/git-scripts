@@ -6,7 +6,7 @@ import pygit2
 import questionary
 from absl.testing import absltest
 
-from git_scripts.cmd.push_stack import execute_push_stack
+from git_scripts.cmd.push.push_stack import execute_push_stack
 from git_scripts.ui import UI
 from tests.helpers import GitTestRepo
 
@@ -48,8 +48,8 @@ class TestCmdPushStack(absltest.TestCase):
         self.repo_helper = GitTestRepo(use_template=True)
         self.repo = pygit2.Repository(self.repo_helper.path)
 
-    @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.cmd.push_stack.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_stack.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_stack.push_branches")
     def test_execute_push_stack_pushes_all_diverged_branches_in_linear_stack(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -80,8 +80,36 @@ class TestCmdPushStack(absltest.TestCase):
             repo_path=self.repo_helper.path,
         )
 
-    @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.cmd.push_stack.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_stack.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_stack.push_branches")
+    def test_execute_push_stack_includes_colocated_branches_without_false_fork(
+        self, mock_push_branches, mock_run_cmd
+    ):
+        """Pushes co-located branches in a linear stack without fork errors."""
+        del mock_run_cmd
+        mock_push_branches.return_value = True
+
+        self.repo_helper.checkout("feat/1", create=True)
+        self.repo_helper.commit("feat1", "f1.txt", "1")
+        # Create a co-located alias branch at feat/1 and a child branch feat/2
+        self.repo_helper.checkout("feat/1-alias", create=True)
+        self.repo_helper.checkout("feat/2", create=True)
+        self.repo_helper.commit("feat2", "f2.txt", "2")
+        self.repo_helper.checkout("feat/1")
+
+        ui = MockUI(choices=["Push all"])
+        result = execute_push_stack(
+            self.repo_helper.path, target="main", ui=ui
+        )
+        self.assertTrue(result)
+        mock_push_branches.assert_called_once_with(
+            branches=["feat/1", "feat/1-alias", "feat/2"],
+            options=[],
+            repo_path=self.repo_helper.path,
+        )
+
+    @mock.patch("git_scripts.cmd.push.push_stack.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_stack.push_branches")
     def test_execute_push_stack_aborts_when_downstream_fork_is_detected(
         self, mock_push_branches, mock_run_cmd
     ):
@@ -122,7 +150,7 @@ class TestCmdPushStack(absltest.TestCase):
         self.assertFalse(result)
         assert any("detached HEAD" in str(p) for p in ui.prints)
 
-    @mock.patch("git_scripts.cmd.push_stack.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_stack.run_cmd")
     def test_execute_push_stack_returns_true_when_stack_has_no_branches(
         self, mock_run_cmd
     ):
@@ -130,20 +158,20 @@ class TestCmdPushStack(absltest.TestCase):
         self.repo.create_branch("orphan", head_commit)
         self.repo_helper.checkout("orphan")
         with mock.patch(
-            "git_scripts.cmd.push_stack._get_linear_stack", return_value=set()
+            "git_scripts.cmd.push.push_stack._get_linear_stack",
+            return_value=set(),
         ):
             ui = MockUI()
             result = execute_push_stack(
                 self.repo_helper.path, target="main", ui=ui
             )
-            print("PRINTS NO BRANCHES:", ui.prints)
             self.assertTrue(result)
             assert any(
                 "No branches found in stack" in str(p) for p in ui.prints
             )
 
-    @mock.patch("git_scripts.cmd.push_stack.run_cmd")
-    @mock.patch("git_scripts.cmd.push_stack.push_branches")
+    @mock.patch("git_scripts.cmd.push.push_stack.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_stack.push_branches")
     def test_execute_push_stack_skips_push_when_all_branches_are_up_to_date(
         self, mock_push_branches, mock_run_cmd
     ):

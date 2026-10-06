@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from absl.testing import absltest
 
-from git_scripts.cmd.rebase_orchestrator import (
+from git_scripts.cmd.rebase.rebase_orchestrator import (
     handle_interactive_conflict,
     rebase_loop,
     rebase_single_branch,
@@ -20,7 +20,7 @@ from git_scripts.ui import UI
 
 
 class TestCmdRebaseOrchestrator(absltest.TestCase):
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_continue")
     def test_handle_interactive_conflict_raises_abort_on_exit_without_rollback(
         self, mock_rebase_continue
     ):
@@ -36,7 +36,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
             "'[bold]my-branch[/bold]'.[/red]"
         )
 
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_abort")
     def test_handle_interactive_conflict_aborts_rebase_when_user_rolls_back(
         self, mock_rebase_abort
     ):
@@ -50,7 +50,7 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertEqual(status, RebaseStatus.ERROR)
         mock_rebase_abort.assert_called_once_with(".")
 
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_continue")
     def test_handle_interactive_conflict_continues_after_manual_resolution(
         self, mock_rebase_continue
     ):
@@ -65,15 +65,13 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertEqual(status, RebaseStatus.SUCCESS)
         mock_rebase_continue.assert_called_once_with(".")
 
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
-    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_continue")
     def test_handle_interactive_conflict_succeeds_if_continued_externally(
         self, mock_rebase_continue, mock_is_worktree_busy, mock_rebase_abort
     ):
         mock_ui = MagicMock()
-        # Initial choice: resolve manually
-        # Second choice inside the false worktree check: "Yes"
         mock_ui.ask_choice.side_effect = [
             "Resolve manually, then continue",
             "Yes",
@@ -89,9 +87,9 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         mock_is_worktree_busy.assert_called_once_with(".")
         mock_rebase_abort.assert_not_called()
 
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
-    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_continue")
     def test_handle_interactive_conflict_errors_if_aborted_externally(
         self, mock_rebase_continue, mock_is_worktree_busy, mock_rebase_abort
     ):
@@ -110,13 +108,12 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertEqual(status, RebaseStatus.ERROR)
         mock_rebase_abort.assert_called_once_with(".")
 
-    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_continue")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_continue")
     def test_handle_interactive_conflict_loops_until_conflicts_resolved(
         self, mock_rebase_continue, mock_is_worktree_busy
     ):
         mock_ui = MagicMock()
-        # Loops once because still busy, then succeeds
         mock_ui.ask_choice.return_value = "Resolve manually, then continue"
         mock_rebase_continue.side_effect = [
             (RebaseStatus.CONFLICT, "conflict"),
@@ -131,12 +128,14 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertEqual(status, RebaseStatus.SUCCESS)
         self.assertEqual(mock_rebase_continue.call_count, 2)
 
-    @patch("git_scripts.cmd.rebase_orchestrator.handle_interactive_conflict")
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
-    @patch("git_scripts.cmd.rebase_orchestrator.execute_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.create_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.get_stack_branches")
-    @patch("git_scripts.cmd.rebase_orchestrator.pygit2.Repository")
+    @patch(
+        "git_scripts.cmd.rebase.rebase_orchestrator.handle_interactive_conflict"
+    )
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.execute_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.create_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.get_stack_branches")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.pygit2.Repository")
     def test_rebase_single_branch_aborts_and_defers_on_conflict(
         self,
         mock_repo_cls,
@@ -171,14 +170,18 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         mock_rebase_abort.assert_called_once_with(".")
         mock_handle_conflict.assert_not_called()
 
-    @patch("git_scripts.cmd.rebase_orchestrator.format_stack_tree")
-    @patch("git_scripts.cmd.rebase_orchestrator.is_obsolete")
-    @patch("git_scripts.cmd.rebase_orchestrator.sync_colocated_branches")
-    @patch("git_scripts.cmd.rebase_orchestrator.handle_interactive_conflict")
-    @patch("git_scripts.cmd.rebase_orchestrator.execute_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.create_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.get_stack_branches")
-    @patch("git_scripts.cmd.rebase_orchestrator.pygit2.Repository")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.format_stack_tree")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.is_obsolete")
+    @patch(
+        "git_scripts.cmd.rebase.rebase_orchestrator.sync_colocated_branches"
+    )
+    @patch(
+        "git_scripts.cmd.rebase.rebase_orchestrator.handle_interactive_conflict"
+    )
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.execute_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.create_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.get_stack_branches")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.pygit2.Repository")
     def test_resolve_conflicted_branch_skips_prompt_when_sync_plan_succeeds(
         self,
         mock_repo_cls,
@@ -223,12 +226,14 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertEqual(result.branches_to_keep, {"feat/fork-b"})
         self.assertEqual(result.failed_log, [])
 
-    @patch("git_scripts.cmd.rebase_orchestrator.format_stack_tree")
-    @patch("git_scripts.cmd.rebase_orchestrator.handle_interactive_conflict")
-    @patch("git_scripts.cmd.rebase_orchestrator.execute_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.create_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.get_stack_branches")
-    @patch("git_scripts.cmd.rebase_orchestrator.pygit2.Repository")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.format_stack_tree")
+    @patch(
+        "git_scripts.cmd.rebase.rebase_orchestrator.handle_interactive_conflict"
+    )
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.execute_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.create_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.get_stack_branches")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.pygit2.Repository")
     def test_resolve_conflicted_branch_records_failure_when_conflict_aborts(
         self,
         mock_repo_cls,
@@ -267,9 +272,11 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertEqual(result.failed_log, ["tree-conflict-failed"])
         self.assertEqual(result.success_log, [])
 
-    @patch("git_scripts.cmd.rebase_orchestrator.resolve_conflicted_branch")
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_single_branch")
-    @patch("git_scripts.cmd.rebase_orchestrator.manage_worktrees")
+    @patch(
+        "git_scripts.cmd.rebase.rebase_orchestrator.resolve_conflicted_branch"
+    )
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_single_branch")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.manage_worktrees")
     def test_rebase_loop_propagates_abort_through_manage_worktrees(
         self,
         mock_manage_wt,
@@ -308,13 +315,13 @@ class TestCmdRebaseOrchestrator(absltest.TestCase):
         self.assertFalse(completed)
         self.assertEqual(exit_exc_types, [ScriptAbortError])
 
-    @patch("git_scripts.cmd.rebase_orchestrator.format_stack_tree")
-    @patch("git_scripts.cmd.rebase_orchestrator.is_worktree_busy")
-    @patch("git_scripts.cmd.rebase_orchestrator.rebase_abort")
-    @patch("git_scripts.cmd.rebase_orchestrator.execute_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.create_rebase_plan")
-    @patch("git_scripts.cmd.rebase_orchestrator.get_stack_branches")
-    @patch("git_scripts.cmd.rebase_orchestrator.pygit2.Repository")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.format_stack_tree")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.is_worktree_busy")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_abort")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.execute_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.create_rebase_plan")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.get_stack_branches")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.pygit2.Repository")
     def test_rebase_single_branch_aborts_busy_worktree_on_fatal_error(
         self,
         mock_repo_cls,

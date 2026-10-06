@@ -4,13 +4,13 @@ import pygit2
 from rich.console import Group
 from rich.panel import Panel
 
-from git_scripts.cmd.rebase_orchestrator import (
+from git_scripts.cmd.rebase.rebase_orchestrator import (
     ScriptAbortError,
     handle_interactive_conflict,
 )
 from git_scripts.cmd.shared import (
     get_ui_worktree_callbacks,
-    resolve_branches_to_push,
+    prompt_and_push_updated_branches,
 )
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
@@ -129,13 +129,11 @@ def _print_evolve_summary(ui, success_count: int, failed_log: list) -> bool:
             "[bold red]⚠️  Failed (Manual Fix Needed):[/bold red]"
         )
         for entry in failed_log:
-            summary_items.append(
-                f"    [red]- {entry.replace(chr(10), chr(10) + '      ')}"
-                "[/red]"
-            )
+            indented = entry.replace("\n", "\n      ")
+            summary_items.append(f"    [red]- {indented}[/red]")
     else:
         summary_items.append(
-            f"[bold green]✨  All Done! "
+            "[bold green]✨  All Done! "
             f"({success_count} stacks evolved)[/bold green]"
         )
 
@@ -257,7 +255,7 @@ def process_single_evolve_stack(
     if sync_point:
         sync_branch, sync_old_hash, sync_new_hash = sync_point
         ui.print(
-            f"    ✨  Detected shared history! "
+            "    ✨  Detected shared history! "
             f"Linking onto updated '{sync_branch}'..."
         )
         plan = BranchRebasePlan(
@@ -372,7 +370,7 @@ def execute_evolve(
         return True
 
     ui.print(
-        f"[dim]🔍  Scanning for stacks displaced by move "
+        "[dim]🔍  Scanning for stacks displaced by move "
         f"from {resolved_old_hash[:7]} to {new_hash[:7]}...[/dim]"
     )
 
@@ -423,42 +421,15 @@ def execute_evolve(
 
     if successfully_evolved_branches:
         branches_to_push = list(successfully_evolved_branches)
+        if current_branch_name and current_branch_name not in branches_to_push:
+            branches_to_push.insert(0, current_branch_name)
 
-        if current_branch_name:
-            if current_branch_name not in branches_to_push:
-                branches_to_push.insert(0, current_branch_name)
-
-        panel_title = (
-            f"[bold cyan]Local branches updated/amended "
-            f"({len(branches_to_push)})[/bold cyan]"
+        prompt_and_push_updated_branches(
+            branches_to_push,
+            repo_path,
+            ui,
+            panel_label="Local branches updated/amended",
+            push_fn=push_branches,
         )
-
-        ui.print()
-        ui.print(
-            Panel(
-                "\n".join(
-                    f"  - [yellow]{b}[/yellow]" for b in branches_to_push
-                ),
-                title=panel_title,
-                border_style="cyan",
-                expand=False,
-            )
-        )
-
-        resolved_branches = resolve_branches_to_push(
-            branches=branches_to_push,
-            ui=ui,
-            prompt_title=(
-                "Push "
-                f"{ui.pluralize(len(branches_to_push), 'updated branch')} "
-                "to origin?"
-            ),
-        )
-        if resolved_branches:
-            push_branches(
-                branches=resolved_branches,
-                options=["--force-with-lease"],
-                repo_path=repo_path,
-            )
 
     return ans

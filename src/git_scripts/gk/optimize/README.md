@@ -1,14 +1,14 @@
-# GitKraken Worktree Optimizer (`git-gk-optimize`)
+# GitKraken Worktree Optimizer (`git gk`)
 
 ## Overview
 
 GitKraken Desktop on Linux degrades on large repositories and linked Git worktrees (`git worktree add`): its file watcher follows symlinks into build caches, thousands of automated CI tags slow down background fetches and tab switches, commit detail panels stutter on open, and terminal Git commands inside linked worktrees do not refresh the commit graph.
 
-`git-gk-optimize` fixes these bottlenecks out-of-tree (`~/.config/gitkraken-optimizer/`) without modifying `/usr/share/gitkraken/` on disk, so optimizations survive system package updates and can be cleanly reverted at any time.
+`git gk` (legacy alias: `git-gk-optimize`) fixes these bottlenecks out-of-tree (`~/.config/gitkraken-optimizer/`) without modifying `/usr/share/gitkraken/` on disk, so optimizations survive system package updates and can be cleanly reverted at any time.
 
 ## Architecture
 
-### Install and Uninstall (`git gk-optimize`)
+### Install and Uninstall (`git gk`)
 
 - [`shim_builder.py`](shim_builder.py) and [`gitkraken_launcher.py`](gitkraken_launcher.py): Builds `libgk_preload_shim.so` with CMake and writes `gitkraken-launcher`, `gitkraken-git`, `watched_repos.json`, and `~/.local/share/applications/gitkraken.desktop`.
 - [`config_loader.py`](config_loader.py) and [`models.py`](models.py): Loads [`config.yaml`](config.yaml) and symlinks it into `~/.config/gitkraken-optimizer/` and `<common-git-dir>/gk-optimizer/`.
@@ -27,16 +27,16 @@ GitKraken Desktop on Linux degrades on large repositories and linked Git worktre
 
 ```bash
 # Install optimizations for a repository and its linked worktrees
-git gk-optimize install ~/path/to/repo --close-gitkraken
+git gk install ~/path/to/repo --close-gitkraken
 
 # Override the tag retention count or pass a custom YAML configuration
-git gk-optimize install ~/path/to/repo --config custom.yaml --keep-recent-tags 5
+git gk install ~/path/to/repo --config custom.yaml --keep-recent-tags 5
 
 # Verify installation state (exits 0 if all checks pass)
-git gk-optimize verify ~/path/to/repo --expect installed
+git gk verify ~/path/to/repo --expect installed
 
 # Restore original repository refs and user settings
-git gk-optimize uninstall ~/path/to/repo --close-gitkraken
+git gk uninstall ~/path/to/repo --close-gitkraken
 ```
 
 ## Issues and Solutions

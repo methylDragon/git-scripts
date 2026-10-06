@@ -22,12 +22,12 @@ This directory contains the Python source code for `git-scripts`. The architectu
 - **`cmd/` (Orchestrators)**
 
   - **Responsibility:** High-level command execution, coordination of the UI with domain logic, state tracking, and control flow loops.
-  - **Boundary:** Modules (e.g., `rebase_prefix.py`, `evolve.py`, `rebase_stack.py`) parse intent and execute the main CLI operations.
-  - **`rebase_orchestrator.py`:** Hosts the centralized `rebase_loop` orchestrator and interactive conflict handlers. Orchestrators in `cmd/` are permitted to receive the `ui` instance, manage worktree state managers, and display interactive output. They rely on domain functions returning actionable status enums instead of raw strings.
+  - **Boundary:** Organized by command domain (`cmd/cleanup/`, `cmd/gh/`, `cmd/push/`, `cmd/rebase/`, plus `evolve.py`, `gk_optimize.py`, and `shared.py`).
+  - **`cmd/rebase/rebase_orchestrator.py`:** Hosts the centralized `rebase_loop` orchestrator, interactive conflict handlers, and post-rebase branch cleanup/push prompts. Orchestrators in `cmd/` are permitted to receive the `ui` instance, manage worktree state managers, and display interactive output.
 
-- **`gh/` (GitHub API)**
+- **`gh/` (GitHub Domain & API)**
 
-  - **Responsibility:** `gh` CLI command execution.
+  - **Responsibility:** `gh` CLI command execution (`api.py`), repository/commit-tree PR template discovery (`template_loader.py`), and pure PR base alignment planning (`pr_planner.py`).
   - **Boundary:** Returns data or raises exceptions on failure. Does not interact with the terminal.
 
 - **`git/` (Git Domain Subsystem)**

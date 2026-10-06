@@ -2,7 +2,7 @@ from unittest import mock
 
 from absl.testing import absltest
 
-from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
+from git_scripts.cmd.rebase.rebase_prefix import execute_rebase_prefix
 from git_scripts.ui import UI
 from tests.helpers import GitTestRepo, run_git
 
@@ -14,7 +14,7 @@ class TestCmdRebasePrefix(absltest.TestCase):
     def tearDown(self):
         self.repo_helper.cleanup()
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
     def test_execute_rebase_prefix_rebases_linear_and_forking_chains(
         self, mock_push
     ):
@@ -72,7 +72,7 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self._assert_parent("test-chain-d-e-f-j", "test-chain-d-e-f-j-k")
         self._assert_parent("test-chain-d-e-f-j-k", "test-chain-d-e-f-j-k-l")
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
     def test_execute_rebase_prefix_preserves_stack_with_colocated_branches(
         self, mock_push
     ):
@@ -124,7 +124,7 @@ class TestCmdRebasePrefix(absltest.TestCase):
         # C should still be a child of A
         self._assert_parent("ch3/A", "ch3/C")
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
     def test_execute_rebase_prefix_rebases_clean_stacks_before_conflict_pass(
         self, mock_push
     ):
@@ -188,7 +188,7 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self._assert_parent("main", "two-pass/2-clean")
         self._assert_parent("main", "two-pass/1-conflict")
 
-    @mock.patch("git_scripts.cmd.rebase_prefix.push_branches")
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
     def test_execute_rebase_prefix_resolves_shared_fork_stem_conflict_once(
         self, mock_push
     ):

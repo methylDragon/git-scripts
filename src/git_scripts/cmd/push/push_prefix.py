@@ -1,4 +1,4 @@
-"""Core logic for the git-push-prefix command."""
+"""Core logic for the git prefix push (git-push-prefix) command."""
 
 import pygit2
 

@@ -1,14 +1,15 @@
-"""Core logic for the git-push-stack command."""
+"""Core logic for the git stack push (git-push-stack) command."""
 
 import pygit2
 
-from git_scripts.cmd.shared import resolve_branches_to_push
+from git_scripts.cmd.shared import (
+    get_local_branch_pool,
+    order_stack_branches,
+    resolve_branches_to_push,
+    resolve_linear_stack,
+)
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.remote import push_branches
-from git_scripts.git.topology import (
-    get_parent_branch,
-    sort_branches_bottom_to_top,
-)
 from git_scripts.ui import UI
 
 
@@ -40,57 +41,23 @@ def _get_out_of_sync_branches_in_stack(
 
 
 def _get_linear_stack(
-    repo, current_branch: str, target: str, pool: set[str], ui
+    repo: pygit2.Repository,
+    current_branch: str,
+    target: str,
+    pool: set[str],
+    ui: UI,
 ) -> set[str] | None:
-    stack = {current_branch}
-
-    if current_branch != target:
-        # Walk up to ancestors
-        curr = current_branch
-        while True:
-            parent = get_parent_branch(repo, curr, pool)
-            if not parent:
-                break
-            if parent == target:
-                break
-            stack.add(parent)
-            curr = parent
-
-    # Walk down to descendants
-    curr = current_branch
-    while True:
-        children = [
-            b
-            for b in pool
-            if b not in stack and get_parent_branch(repo, b, pool) == curr
-        ]
-
-        if not children:
-            break
-
-        if len(children) > 1:
-            ui.print(
-                f"[red]❌  Fork detected downstream at branch '{curr}'."
-                "[/red]\n"
-                f"    Children: {', '.join(children)}\n"
-                "    Cannot determine a single linear stack to push.\n"
-                "    Please checkout the specific tip branch you want to push."
-            )
-            return None
-
-        child = children[0]
-        stack.add(child)
-        curr = child
-
-    stack.discard(target)
-    return stack
+    """Discovers the linear stack containing current_branch within pool."""
+    return resolve_linear_stack(
+        repo, current_branch, target, pool, ui, action_verb="push"
+    )
 
 
 def execute_push_stack(
     repo_path: str,
     target: str = "main",
     push_opts: list[str] | None = None,
-    ui=None,
+    ui: UI | None = None,
 ) -> bool:
     """Pushes out-of-sync local branches in the current stack to the remote."""
     if ui is None:
@@ -115,31 +82,18 @@ def execute_push_stack(
 
     ui.print(f"[cyan]🔍  Analyzing stack for '{current_branch}'...[/cyan]")
 
-    pool = {
-        ref[len("refs/heads/") :]
-        for ref in repo.references
-        if ref.startswith("refs/heads/")
-    }
-
-    # Stop at `target`. Target MUST be in pool for `get_parent_branch` to
-    # find it. `target` is not added to `stack`.
-    pool.add(target)
-
-    # Determine the linear stack
+    pool = get_local_branch_pool(repo, target)
     stack = _get_linear_stack(repo, current_branch, target, pool, ui)
     if stack is None:
         return False
 
-    if not stack or (len(stack) == 1 and list(stack)[0] == target):
+    ordered_stack = order_stack_branches(repo, stack, target)
+    if not ordered_stack:
         ui.print(
             f"    No branches found in stack between '{current_branch}' "
             f"and target '{target}'."
         )
         return True
-
-    parent_map = {b: get_parent_branch(repo, b, stack) for b in stack}
-    ordered_stack = sort_branches_bottom_to_top(stack, parent_map)
-    ordered_stack = [b for b in ordered_stack if b != target]
 
     branches_to_push, up_to_date_count = _get_out_of_sync_branches_in_stack(
         repo, ordered_stack

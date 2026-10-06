@@ -3,8 +3,10 @@ from unittest import mock
 import pygit2
 from absl.testing import absltest
 
-from git_scripts.cmd.prune_local import execute_prune_local
-from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
+from git_scripts.cmd.cleanup.prune_local import execute_prune_local
+from git_scripts.cmd.cleanup.prune_remote_prefix import (
+    execute_prune_remote_prefix,
+)
 from tests.helpers import GitTestRepo
 
 
@@ -30,7 +32,9 @@ class TestCmdPrune(absltest.TestCase):
         self.repo_helper.commit("f2", "f2.txt", "2")
         self.repo_helper.checkout("main")
 
-        with mock.patch("git_scripts.cmd.prune_local.run_cmd") as mock_run_cmd:
+        with mock.patch(
+            "git_scripts.cmd.cleanup.prune_local.run_cmd"
+        ) as mock_run_cmd:
             # We mock the git branch -vv output
             def mock_run(cmd, cwd=None, check=True):
                 if cmd == ["git", "branch", "-vv"]:
@@ -40,9 +44,6 @@ class TestCmdPrune(absltest.TestCase):
                     )
                 elif cmd == ["git", "worktree", "list", "--porcelain"]:
                     return ""
-                # For `git branch -D` we mock run_cmd to intercept everything.
-                # So we just mock the return values for read commands.
-                # To verify delete we can just assert it was called.
                 return ""
 
             mock_run_cmd.side_effect = mock_run
@@ -61,7 +62,9 @@ class TestCmdPrune(absltest.TestCase):
             )
 
     def test_execute_prune_local_ignores_worktrees_and_dry_run(self):
-        with mock.patch("git_scripts.cmd.prune_local.run_cmd") as mock_run_cmd:
+        with mock.patch(
+            "git_scripts.cmd.cleanup.prune_local.run_cmd"
+        ) as mock_run_cmd:
 
             def mock_run(cmd, cwd=None, check=True):
                 if cmd == ["git", "branch", "-vv"]:
@@ -157,7 +160,9 @@ class TestCmdPrune(absltest.TestCase):
         clean_helper.commit("w1", "w1.txt", "worktree")
         clean_helper.checkout("main")
 
-        with mock.patch("git_scripts.cmd.prune_local.run_cmd") as mock_run_cmd:
+        with mock.patch(
+            "git_scripts.cmd.cleanup.prune_local.run_cmd"
+        ) as mock_run_cmd:
 
             def mock_run(cmd, cwd=None, check=True):
                 del cwd, check
@@ -234,7 +239,64 @@ class TestCmdPrune(absltest.TestCase):
                 cwd=clean_helper.path,
             )
 
-    @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
+    def test_execute_prune_local_filters_gone_and_untracked_branches_by_prefix(
+        self,
+    ):
+        """Filters both gone and untracked branches when prefix is supplied."""
+        clean_helper = GitTestRepo(use_template=False)
+        self.addCleanup(clean_helper.cleanup)
+        clean_repo = pygit2.Repository(clean_helper.path)
+
+        clean_helper.checkout("feat/merged", create=True)
+        clean_helper.commit("fm", "fm.txt", "fm")
+        merged_id = clean_repo.revparse_single("feat/merged").id
+        clean_helper.checkout("other/merged", create=True)
+        clean_helper.checkout("main")
+        clean_repo.references.create("refs/heads/main", merged_id, force=True)
+
+        with mock.patch(
+            "git_scripts.cmd.cleanup.prune_local.run_cmd"
+        ) as mock_run_cmd:
+
+            def mock_run(cmd, cwd=None, check=True):
+                del cwd, check
+                if cmd == ["git", "branch", "-vv"]:
+                    return (
+                        "  feat/gone   abcdef [origin/feat/gone: gone] m\n"
+                        "  other/gone  abcdef [origin/other/gone: gone] m\n"
+                    )
+                if cmd == ["git", "worktree", "list", "--porcelain"]:
+                    return "branch refs/heads/main\n"
+                return ""
+
+            mock_run_cmd.side_effect = mock_run
+
+            with mock.patch(
+                "git_scripts.ui.UI.ask_choice", return_value="Delete all"
+            ):
+                result = execute_prune_local(
+                    clean_helper.path,
+                    dry_run=False,
+                    also_prune_no_upstream=True,
+                    prefix="feat/",
+                )
+            self.assertTrue(result)
+            mock_run_cmd.assert_any_call(
+                ["git", "branch", "-D", "feat/gone", "feat/merged"],
+                cwd=clean_helper.path,
+            )
+
+    def test_execute_prune_local_rejects_empty_prefix(self):
+        """Returns False without running git fetch when prefix is blank."""
+        with mock.patch(
+            "git_scripts.cmd.cleanup.prune_local.run_cmd"
+        ) as mock_run_cmd:
+            self.assertFalse(
+                execute_prune_local(self.repo_helper.path, prefix="   ")
+            )
+            mock_run_cmd.assert_not_called()
+
+    @mock.patch("git_scripts.cmd.cleanup.prune_remote_prefix.subprocess_run")
     def test_execute_prune_remote_prefix_deletes_merged_branches(
         self, mock_subprocess_run
     ):
@@ -268,7 +330,7 @@ class TestCmdPrune(absltest.TestCase):
             check=True,
         )
 
-    @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
+    @mock.patch("git_scripts.cmd.cleanup.prune_remote_prefix.subprocess_run")
     def test_execute_prune_remote_prefix_skips_deletion_in_dry_run_mode(
         self, mock_subprocess_run
     ):
@@ -289,7 +351,7 @@ class TestCmdPrune(absltest.TestCase):
             if args and args[0][0] == "git" and args[0][1] == "push":
                 self.fail("git push called during dry run")
 
-    @mock.patch("git_scripts.cmd.prune_remote_prefix.subprocess_run")
+    @mock.patch("git_scripts.cmd.cleanup.prune_remote_prefix.subprocess_run")
     def test_execute_prune_remote_prefix_deletes_orphan_with_no_local_flag(
         self, mock_subprocess_run
     ):

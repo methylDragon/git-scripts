@@ -7,6 +7,10 @@ from typing import Annotated
 
 import typer
 
+from git_scripts.cmd.cleanup import (
+    execute_prune_local,
+    execute_prune_remote_prefix,
+)
 from git_scripts.cmd.evolve import execute_evolve
 from git_scripts.cmd.gh.pr_aligner import (
     execute_align_pr_bases_and_sync_stacks,
@@ -18,15 +22,36 @@ from git_scripts.cmd.gk_optimize import (
     execute_gk_verify,
     execute_watch_daemon,
 )
-from git_scripts.cmd.prune_local import execute_prune_local
-from git_scripts.cmd.prune_remote_prefix import execute_prune_remote_prefix
-from git_scripts.cmd.push_prefix import execute_push_prefix
-from git_scripts.cmd.push_stack import execute_push_stack
-from git_scripts.cmd.rebase_prefix import execute_rebase_prefix
-from git_scripts.cmd.rebase_stack import execute_rebase_stack
+from git_scripts.cmd.push import execute_push_prefix, execute_push_stack
+from git_scripts.cmd.rebase import execute_rebase_prefix, execute_rebase_stack
 from git_scripts.ui import UI
 
-app = typer.Typer(help="Git Stack Utilities", add_completion=False)
+app = typer.Typer(
+    help="Git Stack Utilities",
+    add_completion=False,
+    no_args_is_help=True,
+)
+stack_app = typer.Typer(
+    help="Rebase, push, and evolve the current linear branch stack",
+    add_completion=False,
+    no_args_is_help=True,
+)
+prefix_app = typer.Typer(
+    help="Batch rebase, push, and prune branches matching a prefix",
+    add_completion=False,
+    no_args_is_help=True,
+)
+cleanup_app = typer.Typer(
+    help="Clean up merged or orphaned local and remote branches",
+    add_completion=False,
+    no_args_is_help=True,
+)
+cleanup_branches_app = typer.Typer(
+    help="Clean up local or remote branches",
+    add_completion=False,
+    no_args_is_help=True,
+)
+cleanup_app.add_typer(cleanup_branches_app, name="branches")
 gh_app = typer.Typer(
     help="Align GitHub PR bases and synchronize PR stacks",
     add_completion=False,
@@ -37,11 +62,16 @@ gk_app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
+app.add_typer(stack_app, name="stack")
+app.add_typer(prefix_app, name="prefix")
+app.add_typer(cleanup_app, name="cleanup")
 app.add_typer(gh_app, name="gh")
-app.add_typer(gk_app, name="gk-optimize")
+app.add_typer(gk_app, name="gk")
+app.add_typer(gk_app, name="gk-optimize", hidden=True)
 
 
-@app.command("rebase-stack")
+@stack_app.command("rebase")
+@app.command("rebase-stack", hidden=True)
 def rebase_stack(
     target: Annotated[
         str,
@@ -94,7 +124,8 @@ def rebase_stack(
     raise typer.Exit(code=0 if success else 1)
 
 
-@app.command("rebase-prefix")
+@prefix_app.command("rebase")
+@app.command("rebase-prefix", hidden=True)
 def rebase_prefix(
     prefix: Annotated[str, typer.Argument(help="Branch prefix to search for")],
     target: Annotated[str, typer.Argument(help="Target branch")] = "main",
@@ -134,8 +165,16 @@ def rebase_prefix(
     raise typer.Exit(code=0 if success else 1)
 
 
+@stack_app.command(
+    "push",
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+    },
+)
 @app.command(
     "push-stack",
+    hidden=True,
     context_settings={
         "allow_extra_args": True,
         "ignore_unknown_options": True,
@@ -180,8 +219,16 @@ def push_stack(
     raise typer.Exit(code=0 if success else 1)
 
 
+@prefix_app.command(
+    "push",
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+    },
+)
 @app.command(
     "push-prefix",
+    hidden=True,
     context_settings={
         "allow_extra_args": True,
         "ignore_unknown_options": True,
@@ -228,6 +275,7 @@ def push_prefix(
     raise typer.Exit(code=0 if success else 1)
 
 
+@stack_app.command("evolve")
 @app.command("evolve")
 def evolve(
     old_hash: Annotated[
@@ -261,9 +309,18 @@ def evolve(
     raise typer.Exit(code=0 if success else 1)
 
 
-@app.command("prune-local")
+@cleanup_branches_app.command("local")
+@app.command("prune-local", hidden=True)
 def prune_local(
     target: Annotated[str, typer.Argument(help="Target branch")] = "main",
+    prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--prefix",
+            "-p",
+            help="Only prune local branches matching this prefix",
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("-n", "--dry-run", help="Run without making changes"),
@@ -301,12 +358,15 @@ def prune_local(
         dry_run=dry_run,
         also_prune_no_upstream=also_prune_no_upstream,
         target=target,
+        prefix=prefix,
         ui=ui,
     )
     raise typer.Exit(code=0 if success else 1)
 
 
-@app.command("prune-remote-prefix")
+@cleanup_branches_app.command("remote")
+@prefix_app.command("prune")
+@app.command("prune-remote-prefix", hidden=True)
 def prune_remote_prefix(
     prefix: Annotated[str, typer.Argument(help="Prefix to match")],
     target: Annotated[str, typer.Argument(help="Target branch")] = "main",

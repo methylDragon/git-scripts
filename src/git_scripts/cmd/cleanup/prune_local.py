@@ -1,11 +1,14 @@
-"""Core logic for the git-prune-local command."""
+"""Core logic for the git cleanup branches local (git-prune-local) command."""
 
 import time
 
 import pygit2
 from rich.panel import Panel
 
-from git_scripts.cmd.shared import BranchProgressTracker
+from git_scripts.cmd.shared import (
+    BranchProgressTracker,
+    select_branches_to_delete,
+)
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.parallel import analyze_branches_in_parallel
 from git_scripts.git.reads import get_repo, is_obsolete
@@ -29,7 +32,9 @@ def _get_worktree_branches(repo_path: str) -> set[str]:
 
 
 def _get_gone_branches(
-    repo_path: str, worktree_branches: set[str]
+    repo_path: str,
+    worktree_branches: set[str],
+    prefix: str | None = None,
 ) -> list[str]:
     """Finds local branches whose upstream tracking branches are gone."""
     try:
@@ -39,11 +44,14 @@ def _get_gone_branches(
 
     branches_to_prune = []
     for line in branch_vv_out.splitlines():
-        if ": gone]" in line:
-            parts = line.strip().split()
-            branch = parts[1] if parts[0] in ("*", "+") else parts[0]
-            if branch not in worktree_branches:
-                branches_to_prune.append(branch)
+        if ": gone]" not in line:
+            continue
+        parts = line.strip().split()
+        branch = parts[1] if parts[0] in ("*", "+") else parts[0]
+        if prefix is not None and not branch.startswith(prefix):
+            continue
+        if branch not in worktree_branches:
+            branches_to_prune.append(branch)
     return branches_to_prune
 
 
@@ -77,12 +85,16 @@ def _get_protected_branches(
 
 
 def _get_untracked_local_branches(
-    repo: pygit2.Repository, protected_branches: set[str]
+    repo: pygit2.Repository,
+    protected_branches: set[str],
+    prefix: str | None = None,
 ) -> list[str]:
     """Returns local branches that have no upstream tracking configured."""
     untracked = []
     for branch_name in sorted(repo.branches.local):
         if branch_name in protected_branches:
+            continue
+        if prefix is not None and not branch_name.startswith(prefix):
             continue
         if not _has_upstream_tracking(repo, branch_name):
             untracked.append(branch_name)
@@ -172,10 +184,13 @@ def _find_local_branches_to_prune(
     target: str,
     also_prune_no_upstream: bool,
     ui: UI,
+    prefix: str | None = None,
 ) -> LocalPruneResult:
     """Discovers gone and untracked local branches eligible for pruning."""
     worktree_branches = _get_worktree_branches(repo_path)
-    gone_branches = _get_gone_branches(repo_path, worktree_branches)
+    gone_branches = _get_gone_branches(
+        repo_path, worktree_branches, prefix=prefix
+    )
     if not also_prune_no_upstream:
         return LocalPruneResult(
             orphaned_branches=gone_branches,
@@ -186,7 +201,9 @@ def _find_local_branches_to_prune(
     protected = _get_protected_branches(
         repo, target, worktree_branches, gone_branches
     )
-    untracked_branches = _get_untracked_local_branches(repo, protected)
+    untracked_branches = _get_untracked_local_branches(
+        repo, protected, prefix=prefix
+    )
     obsolete_untracked, unmerged_untracked = _classify_untracked_branches(
         repo_path, repo, untracked_branches, target, ui
     )
@@ -230,32 +247,6 @@ def _print_prune_local_summary(prune_result: LocalPruneResult, ui: UI) -> None:
         )
 
 
-def _select_branches_to_delete(
-    branches: list[str],
-    prompt_msg: str,
-    checkbox_msg: str,
-    ui: UI,
-) -> list[str]:
-    """Prompts the user to select which branches from a bucket to delete."""
-    if not branches:
-        return []
-    if ui.auto_yes:
-        return list(branches)
-
-    action = ui.ask_choice(
-        prompt_msg,
-        choices=["Skip all", "Select which to delete", "Delete all"],
-        default="Skip all",
-    )
-    match action:
-        case "Delete all":
-            return list(branches)
-        case "Select which to delete":
-            return ui.ask_checkbox(checkbox_msg, choices=branches)
-        case _:
-            return []
-
-
 def _prompt_and_delete_local_branches(
     prune_result: LocalPruneResult, ui: UI, repo_path: str
 ) -> bool:
@@ -268,7 +259,7 @@ def _prompt_and_delete_local_branches(
         orphaned_label = ui.pluralize(len(orphaned), "orphaned local branch")
         orphaned_prompt = f"❓  Delete the {orphaned_label}?"
         to_delete.extend(
-            _select_branches_to_delete(
+            select_branches_to_delete(
                 orphaned,
                 orphaned_prompt,
                 "Select orphaned local branches to delete:",
@@ -282,7 +273,7 @@ def _prompt_and_delete_local_branches(
             "(no upstream tracking)?"
         )
         to_delete.extend(
-            _select_branches_to_delete(
+            select_branches_to_delete(
                 unmerged,
                 unmerged_prompt,
                 "Select unmerged local branches to delete:",
@@ -309,11 +300,16 @@ def execute_prune_local(
     dry_run: bool = False,
     also_prune_no_upstream: bool = False,
     target: str = "main",
+    prefix: str | None = None,
     ui: UI | None = None,
 ) -> bool:
     """Prunes local branches that no longer exist on the remote."""
     if ui is None:
         ui = UI()
+
+    if prefix is not None and not prefix.strip():
+        ui.print("❌  Error: <prefix> cannot be empty.")
+        return False
 
     if dry_run:
         ui.print("Running git-prune-local in dry-run mode...")
@@ -325,7 +321,7 @@ def execute_prune_local(
         pass
 
     prune_result = _find_local_branches_to_prune(
-        repo_path, target, also_prune_no_upstream, ui
+        repo_path, target, also_prune_no_upstream, ui, prefix=prefix
     )
 
     if (

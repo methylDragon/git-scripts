@@ -1,4 +1,4 @@
-"""Core logic for the git-prune-remote-prefix command."""
+"""Core logic for pruning obsolete remote branches by prefix."""
 
 import time
 from subprocess import CalledProcessError
@@ -7,7 +7,10 @@ from subprocess import run as subprocess_run
 import pygit2
 from rich.panel import Panel
 
-from git_scripts.cmd.shared import BranchProgressTracker
+from git_scripts.cmd.shared import (
+    BranchProgressTracker,
+    select_branches_to_delete,
+)
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.parallel import analyze_branches_in_parallel
 from git_scripts.git.reads import get_repo, is_obsolete
@@ -183,52 +186,33 @@ def _prompt_and_delete_branches(
     ui: UI,
     repo_path: str,
 ) -> bool:
-    to_delete = []
+    to_delete: list[str] = []
 
     if obsolete_branches:
-        if ui.auto_yes:
-            to_delete.extend(obsolete_branches)
-        else:
-            action = ui.ask_choice(
-                "❓  Delete {}?".format(
-                    ui.pluralize(
-                        len(obsolete_branches), "obsolete remote branch"
-                    )
-                ),
-                choices=["Skip all", "Select which to delete", "Delete all"],
+        obsolete_label = ui.pluralize(
+            len(obsolete_branches), "obsolete remote branch"
+        )
+        to_delete.extend(
+            select_branches_to_delete(
+                obsolete_branches,
+                f"❓  Delete {obsolete_label}?",
+                "Select obsolete remote branches to delete:",
+                ui,
                 default="Delete all",
             )
-            match action:
-                case "Delete all":
-                    to_delete.extend(obsolete_branches)
-                case "Select which to delete":
-                    to_delete.extend(
-                        ui.ask_checkbox(
-                            "Select obsolete remote branches to delete:",
-                            choices=obsolete_branches,
-                        )
-                    )
+        )
 
     if unmerged_no_local:
-        if ui.auto_yes:
-            to_delete.extend(unmerged_no_local)
-        else:
-            action = ui.ask_choice(
+        to_delete.extend(
+            select_branches_to_delete(
+                unmerged_no_local,
                 f"⚠️  Delete {len(unmerged_no_local)} unmerged remote branches "
                 "(no local copy found)?",
-                choices=["Skip all", "Select which to delete", "Delete all"],
+                "Select unmerged remote branches to delete:",
+                ui,
                 default="Skip all",
             )
-            match action:
-                case "Delete all":
-                    to_delete.extend(unmerged_no_local)
-                case "Select which to delete":
-                    to_delete.extend(
-                        ui.ask_checkbox(
-                            "Select unmerged remote branches to delete:",
-                            choices=unmerged_no_local,
-                        )
-                    )
+        )
 
     if not to_delete:
         return True
