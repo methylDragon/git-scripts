@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PIXI_PROJECT_MANIFEST="$SCRIPT_DIR/pixi.toml"
-
-exec pixi run --manifest-path "$PIXI_PROJECT_MANIFEST" git-scripts stack "$@"
+set -e
+SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" &>/dev/null && pwd)
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+exec "$PROJECT_ROOT/.pixi/envs/default/bin/python" -u -m git_scripts.cli stack "$@"

@@ -8,13 +8,4 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 git pull origin main
 
-echo "Rebuilding environment..."
-pixi install
-
-echo "Updating symlinks in ~/.local/bin..."
-mkdir -p ~/.local/bin
-for script in bin/git-*; do
-  ln -sf "$PROJECT_ROOT/$script" ~/.local/bin/"$(basename "$script")"
-done
-
-echo "✅  git-scripts updated successfully!"
+exec "$PROJECT_ROOT/install.sh" --local

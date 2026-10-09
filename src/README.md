@@ -9,9 +9,9 @@ This directory contains the Python source code for `git-scripts`. The architectu
   - **Responsibility:** Terminal output, user prompts, progress bars, and string formatting.
   - **Boundary:** This module manages `rich` and `questionary` dependencies. It does not execute Git or GitHub operations or hold repository state.
 
-- **`cli.py` (Entrypoint)**
+- **`cli/` (Entrypoint and Command Signatures)**
 
-  - **Responsibility:** Typer/Click command signatures and argument parsing.
+  - **Responsibility:** Typer/Click command signatures, `Annotated` option types (`cli_common.py`), and group modules (`stack_commands.py`, `prefix_commands.py`, `cleanup_commands.py`, `gh_commands.py`, `gk_commands.py`).
   - **Boundary:** Maps CLI inputs to the corresponding orchestrator in `cmd/`. Does not implement domain logic.
 
 - **`models.py` (Data)**
@@ -25,7 +25,7 @@ This directory contains the Python source code for `git-scripts`. The architectu
   - **Boundary:** Organized by command domain (`cmd/cleanup/`, `cmd/gh/`, `cmd/push/`, `cmd/rebase/`, plus `evolve.py`, `gk_optimize.py`, and `shared.py`).
   - **`cmd/rebase/rebase_orchestrator.py`:** Hosts the centralized `rebase_loop` orchestrator, interactive conflict handlers, and post-rebase branch cleanup/push prompts. Orchestrators in `cmd/` are permitted to receive the `ui` instance, manage worktree state managers, and display interactive output.
 
-- **`gh/` (GitHub Domain & API)**
+- **`gh/` (GitHub Domain and API)**
 
   - **Responsibility:** `gh` CLI command execution (`api.py`), repository/commit-tree PR template discovery (`template_loader.py`), and pure PR base alignment planning (`pr_planner.py`).
   - **Boundary:** Returns data or raises exceptions on failure. Does not interact with the terminal.

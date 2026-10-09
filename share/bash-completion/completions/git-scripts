@@ -1,0 +1,215 @@
+# bash completion and Rich --help wrapper for git-scripts
+# shellcheck shell=bash disable=SC2154
+
+# Forward `git <git-scripts-cmd> ... --help` to `-h` so Typer/Rich renders
+# inline help instead of Git intercepting `--help` and opening `man`.
+git() {
+  case "${1-}" in
+  stack | prefix | cleanup | gh | gk | gk-optimize | evolve | rebase-stack | \
+    rebase-prefix | push-stack | push-prefix | prune-local | \
+    prune-remote-prefix | gh-align-pr-bases-and-sync-stacks)
+    local arg args=()
+    for arg in "$@"; do
+      if [[ $arg == "--help" ]]; then
+        args+=("-h")
+      else
+        args+=("$arg")
+      fi
+    done
+    command git "${args[@]}"
+    ;;
+  *)
+    command git "$@"
+    ;;
+  esac
+}
+
+__git_scripts_branch_prefixes() {
+  local git_dir="${__git_repo_path-}"
+  local -a args=()
+  if [[ -n $git_dir ]]; then
+    args=(--git-dir="$git_dir")
+  fi
+  command git "${args[@]}" for-each-ref \
+    --format='%(refname:short)' refs/heads refs/remotes/origin 2>/dev/null |
+    sed -e 's#^origin/##' |
+    awk -F/ 'NF > 1 {
+      acc = ""
+      for (i = 1; i < NF; i++) {
+        acc = acc $i "/"
+        print acc
+      }
+    }' | sort -u
+}
+
+__git_scripts_complete_arg_kind() {
+  case "$1" in
+  prefix) __gitcomp_nl "$(__git_scripts_branch_prefixes)" ;;
+  ref) __gitcomp_nl "$(__git_refs)" ;;
+  dir) _filedir -d ;;
+  esac
+}
+
+# Table-driven leaf completion:
+#   __git_scripts_complete_leaf <flags> <pos0_kind> <pos1_kind> [start_idx]
+__git_scripts_complete_leaf() {
+  local flags="$1" pos0="$2" pos1="$3" start_idx="${4:-$((__git_cmd_idx + 1))}"
+  case "$prev" in
+  --target)
+    __gitcomp_nl "$(__git_refs)"
+    return
+    ;;
+  --prefix | -p)
+    __gitcomp_nl "$(__git_scripts_branch_prefixes)"
+    return
+    ;;
+  --remote | -r)
+    __gitcomp_nl "$(__git_remotes)"
+    return
+    ;;
+  --config)
+    _filedir '@(yml|yaml)'
+    return
+    ;;
+  --expect)
+    __gitcomp "installed uninstalled"
+    return
+    ;;
+  --keep-recent-tags)
+    return
+    ;;
+  esac
+
+  if [[ $cur == -* ]]; then
+    __gitcomp "$flags"
+    return
+  fi
+
+  local idx=$((start_idx + 1)) pos_count=0 token
+  while [[ $idx -lt $cword ]]; do
+    token="${words[$idx]}"
+    case "$token" in
+    --target | --prefix | -p | --remote | -r | --config | --expect | --keep-recent-tags)
+      ((idx += 2))
+      continue
+      ;;
+    -*) ;;
+    *) ((pos_count++)) ;;
+    esac
+    ((idx++))
+  done
+
+  if [[ $pos_count -eq 0 ]]; then
+    __git_scripts_complete_arg_kind "$pos0"
+  elif [[ $pos_count -eq 1 ]]; then
+    __git_scripts_complete_arg_kind "$pos1"
+  fi
+}
+
+_git_stack() {
+  local subcmd subcmd_idx
+  subcmd="$(__git_find_on_cmdline "rebase push evolve")"
+  if [[ -z $subcmd ]]; then
+    [[ $cur == -* ]] && __gitcomp "-h --help" || __gitcomp "rebase push evolve"
+    return
+  fi
+  subcmd_idx="$(__git_find_on_cmdline --show-idx "rebase push evolve")"
+  subcmd_idx="${subcmd_idx%% *}"
+  case "$subcmd" in
+  rebase) __git_scripts_complete_leaf "--all-worktrees --auto-delete --plain -y --yes -h --help" ref none "$subcmd_idx" ;;
+  push) __git_scripts_complete_leaf "--target --force-with-lease --force --dry-run --no-verify --plain -y --yes -h --help" none none "$subcmd_idx" ;;
+  evolve) __git_scripts_complete_leaf "--plain -y --yes -h --help" ref none "$subcmd_idx" ;;
+  esac
+}
+
+_git_prefix() {
+  local subcmd subcmd_idx
+  subcmd="$(__git_find_on_cmdline "rebase push prune")"
+  if [[ -z $subcmd ]]; then
+    [[ $cur == -* ]] && __gitcomp "-h --help" || __gitcomp "rebase push prune"
+    return
+  fi
+  subcmd_idx="$(__git_find_on_cmdline --show-idx "rebase push prune")"
+  subcmd_idx="${subcmd_idx%% *}"
+  case "$subcmd" in
+  rebase) __git_scripts_complete_leaf "--all-worktrees --auto-delete --plain -y --yes -h --help" prefix ref "$subcmd_idx" ;;
+  push) __git_scripts_complete_leaf "--force-with-lease --force --dry-run --no-verify --plain -y --yes -h --help" prefix none "$subcmd_idx" ;;
+  prune) __git_scripts_complete_leaf "-n --dry-run --also-prune-no-local --plain -y --yes -h --help" prefix ref "$subcmd_idx" ;;
+  esac
+}
+
+_git_cleanup() {
+  local group
+  group="$(__git_find_on_cmdline "branches")"
+  if [[ -z $group ]]; then
+    [[ $cur == -* ]] && __gitcomp "-h --help" || __gitcomp "branches"
+    return
+  fi
+  local subcmd subcmd_idx
+  subcmd="$(__git_find_on_cmdline "local remote")"
+  if [[ -z $subcmd ]]; then
+    [[ $cur == -* ]] && __gitcomp "-h --help" || __gitcomp "local remote"
+    return
+  fi
+  subcmd_idx="$(__git_find_on_cmdline --show-idx "local remote")"
+  subcmd_idx="${subcmd_idx%% *}"
+  case "$subcmd" in
+  local) __git_scripts_complete_leaf "--prefix -p -n --dry-run --also-prune-no-upstream --plain -y --yes -h --help" ref none "$subcmd_idx" ;;
+  remote) __git_scripts_complete_leaf "-n --dry-run --also-prune-no-local --plain -y --yes -h --help" prefix ref "$subcmd_idx" ;;
+  esac
+}
+
+_git_gh() {
+  local subcmd subcmd_idx
+  subcmd="$(__git_find_on_cmdline "align")"
+  if [[ -z $subcmd ]]; then
+    [[ $cur == -* ]] && __gitcomp "-h --help" || __gitcomp "align"
+    return
+  fi
+  subcmd_idx="$(__git_find_on_cmdline --show-idx "align")"
+  subcmd_idx="${subcmd_idx%% *}"
+  __git_scripts_complete_leaf "--current --all -i --interactive --create-missing -r --remote --plain -y --yes -h --help" prefix ref "$subcmd_idx"
+}
+
+_git_gk() {
+  local subcmd subcmd_idx
+  subcmd="$(__git_find_on_cmdline "install verify uninstall")"
+  if [[ -z $subcmd ]]; then
+    [[ $cur == -* ]] && __gitcomp "-h --help" || __gitcomp "install verify uninstall"
+    return
+  fi
+  subcmd_idx="$(__git_find_on_cmdline --show-idx "install verify uninstall")"
+  subcmd_idx="${subcmd_idx%% *}"
+  case "$subcmd" in
+  install) __git_scripts_complete_leaf "--config --keep-recent-tags --close-gitkraken --plain -y --yes -h --help" dir none "$subcmd_idx" ;;
+  verify) __git_scripts_complete_leaf "--expect --plain -y --yes -h --help" dir none "$subcmd_idx" ;;
+  uninstall) __git_scripts_complete_leaf "--close-gitkraken --plain -y --yes -h --help" dir none "$subcmd_idx" ;;
+  esac
+}
+
+_git_gk_optimize() { _git_gk; }
+_git_evolve() { __git_scripts_complete_leaf "--plain -y --yes -h --help" ref none "${__git_cmd_idx:-0}"; }
+_git_rebase_stack() { __git_scripts_complete_leaf "--all-worktrees --auto-delete --plain -y --yes -h --help" ref none "${__git_cmd_idx:-0}"; }
+_git_rebase_prefix() { __git_scripts_complete_leaf "--all-worktrees --auto-delete --plain -y --yes -h --help" prefix ref "${__git_cmd_idx:-0}"; }
+_git_push_stack() { __git_scripts_complete_leaf "--target --force-with-lease --force --dry-run --no-verify --plain -y --yes -h --help" none none "${__git_cmd_idx:-0}"; }
+_git_push_prefix() { __git_scripts_complete_leaf "--force-with-lease --force --dry-run --no-verify --plain -y --yes -h --help" prefix none "${__git_cmd_idx:-0}"; }
+_git_prune_local() { __git_scripts_complete_leaf "--prefix -p -n --dry-run --also-prune-no-upstream --plain -y --yes -h --help" ref none "${__git_cmd_idx:-0}"; }
+_git_prune_remote_prefix() { __git_scripts_complete_leaf "-n --dry-run --also-prune-no-local --plain -y --yes -h --help" prefix ref "${__git_cmd_idx:-0}"; }
+_git_gh_align_pr_bases_and_sync_stacks() { __git_scripts_complete_leaf "--current --all -i --interactive --create-missing -r --remote --plain -y --yes -h --help" prefix ref "${__git_cmd_idx:-0}"; }
+
+if declare -F ___git_complete >/dev/null 2>&1; then
+  ___git_complete git-stack _git_stack
+  ___git_complete git-prefix _git_prefix
+  ___git_complete git-cleanup _git_cleanup
+  ___git_complete git-gh _git_gh
+  ___git_complete git-gk _git_gk
+  ___git_complete git-gk-optimize _git_gk_optimize
+  ___git_complete git-evolve _git_evolve
+  ___git_complete git-rebase-stack _git_rebase_stack
+  ___git_complete git-rebase-prefix _git_rebase_prefix
+  ___git_complete git-push-stack _git_push_stack
+  ___git_complete git-push-prefix _git_push_prefix
+  ___git_complete git-prune-local _git_prune_local
+  ___git_complete git-prune-remote-prefix _git_prune_remote_prefix
+  ___git_complete git-gh-align-pr-bases-and-sync-stacks _git_gh_align_pr_bases_and_sync_stacks
+fi
