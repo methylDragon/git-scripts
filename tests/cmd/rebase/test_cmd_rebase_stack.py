@@ -216,6 +216,36 @@ class TestCmdRebaseStack(absltest.TestCase):
                 any("No branches found in stack" in str(p) for p in ui.prints)
             )
 
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
+    def test_execute_rebase_stack_deletes_checked_out_merged_branch(
+        self, mock_push
+    ):
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("stk/merged-current", create=True)
+        self.repo_helper.commit("merged work", "merged_work.txt", "done")
+
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit(
+            "squash merged work", "merged_work.txt", "done"
+        )
+
+        self.repo_helper.checkout("stk/merged-current")
+
+        ui = MockUI(auto_yes=True)
+        success = execute_rebase_stack(
+            repo_path=self.repo_helper.path,
+            target="main",
+            all_worktrees=False,
+            auto_delete=True,
+            ui=ui,
+        )
+
+        self.assertTrue(success)
+        mock_push.assert_not_called()
+        repo = self.repo_helper.get_pygit2_repo()
+        self.assertNotIn("stk/merged-current", set(repo.branches.local))
+        self.assertEqual(repo.head.shorthand, "main")
+
     def _assert_parent(self, parent_branch: str, child_branch: str):
         parent_hash = self.repo_helper.rev_parse(parent_branch)
         try:

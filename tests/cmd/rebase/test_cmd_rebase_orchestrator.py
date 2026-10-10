@@ -4,22 +4,184 @@ from absl.testing import absltest
 
 from git_scripts.cmd.rebase.rebase_orchestrator import (
     handle_interactive_conflict,
+    prompt_and_delete_merged,
     rebase_loop,
     rebase_single_branch,
     resolve_conflicted_branch,
 )
+from git_scripts.git.core import GitExecutionError
 from git_scripts.models import (
     BatchRebaseConfig,
     BranchRebasePlan,
     RebaseAction,
     RebaseStatus,
     ScriptAbortError,
+    SingleBranchResult,
     WorktreeState,
 )
 from git_scripts.ui import UI
+from tests.helpers import GitTestRepo
 
 
 class TestCmdRebaseOrchestrator(absltest.TestCase):
+    def test_prompt_and_delete_merged_detaches_linked_worktree_before_delete(
+        self,
+    ):
+        repo_helper = GitTestRepo()
+        self.addCleanup(repo_helper.cleanup)
+        repo_helper.checkout("main")
+        repo_helper.checkout("ch3/quota-service-owners", create=True)
+        repo_helper.commit("quota", "quota.txt", "quota")
+        repo_helper.checkout("main")
+
+        wt_path = f"{repo_helper.temp_dir.name}/wt_quota"
+        repo_helper.create_worktree(wt_path, "ch3/quota-service-owners")
+
+        result = SingleBranchResult(
+            branches_to_delete={"ch3/insrc-iii", "ch3/quota-service-owners"}
+        )
+        mock_ui = MagicMock()
+        mock_ui.auto_yes = False
+        mock_ui.pluralize.side_effect = UI(plain=True).pluralize
+        mock_ui.ask_choice.return_value = "Select which to delete"
+        mock_ui.ask_checkbox.return_value = ["ch3/quota-service-owners"]
+
+        prompt_and_delete_merged(
+            result,
+            auto_delete=False,
+            ui=mock_ui,
+            repo_path=repo_helper.path,
+            target="main",
+        )
+
+        self.assertNotIn(
+            "ch3/quota-service-owners",
+            set(repo_helper.get_pygit2_repo().branches.local),
+        )
+        self.assertTrue(
+            any(
+                "Detaching 'ch3/quota-service-owners'" in str(call.args[0])
+                for call in mock_ui.print.call_args_list
+                if call.args
+            )
+        )
+
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.detach_worktrees")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.pygit2.Repository")
+    @patch("git_scripts.cmd.rebase.rebase_orchestrator.run_cmd")
+    def test_prompt_and_delete_merged_reports_error_and_partial_deletions(
+        self, mock_run_cmd, mock_repo_cls, mock_detach
+    ):
+        del mock_detach
+
+        def side_effect(cmd, cwd=None):
+            del cwd
+            if cmd[:3] == ["git", "branch", "-D"]:
+                raise GitExecutionError("checked out at worktree")
+            return ""
+
+        mock_run_cmd.side_effect = side_effect
+        mock_repo_cls.return_value.branches.local = ["ch3/kept-branch"]
+        result = SingleBranchResult(
+            branches_to_delete={"ch3/deleted-branch", "ch3/kept-branch"}
+        )
+        mock_ui = MagicMock()
+        mock_ui.auto_yes = True
+
+        prompt_and_delete_merged(
+            result,
+            auto_delete=True,
+            ui=mock_ui,
+            repo_path=".",
+            target="main",
+        )
+
+        printed_renderables = [
+            call.args[0] for call in mock_ui.print.call_args_list if call.args
+        ]
+        self.assertTrue(
+            any(
+                "Failed to delete branches" in str(r)
+                for r in printed_renderables
+            )
+        )
+        panel_renderables = [
+            getattr(r, "renderable", "")
+            for r in printed_renderables
+            if getattr(r, "title", None)
+            == "[bold red]Deleted Branches[/bold red]"
+        ]
+        self.assertEqual(len(panel_renderables), 1)
+        self.assertIn("ch3/deleted-branch", str(panel_renderables[0]))
+        self.assertNotIn("ch3/kept-branch", str(panel_renderables[0]))
+
+    @patch("git_scripts.git.worktrees.is_worktree_busy", return_value=True)
+    def test_prompt_and_delete_merged_skips_detach_when_worktree_is_busy(
+        self, mock_is_busy
+    ):
+        repo_helper = GitTestRepo()
+        self.addCleanup(repo_helper.cleanup)
+        repo_helper.checkout("main")
+        repo_helper.checkout("ch3/busy-branch", create=True)
+        repo_helper.commit("busy", "busy.txt", "busy")
+        repo_helper.checkout("main")
+
+        wt_path = f"{repo_helper.temp_dir.name}/wt_busy"
+        repo_helper.create_worktree(wt_path, "ch3/busy-branch")
+
+        result = SingleBranchResult(branches_to_delete={"ch3/busy-branch"})
+        mock_ui = MagicMock()
+        mock_ui.auto_yes = True
+
+        prompt_and_delete_merged(
+            result,
+            auto_delete=True,
+            ui=mock_ui,
+            repo_path=repo_helper.path,
+            target="main",
+        )
+
+        mock_is_busy.assert_called_once_with(wt_path)
+        self.assertIn(
+            "ch3/busy-branch",
+            set(repo_helper.get_pygit2_repo().branches.local),
+        )
+        self.assertTrue(
+            any(
+                f"Worktree '{wt_path}' is busy" in str(call.args[0])
+                for call in mock_ui.print.call_args_list
+                if call.args
+            )
+        )
+
+    def test_prompt_and_delete_merged_detaches_head_when_target_in_worktree(
+        self,
+    ):
+        repo_helper = GitTestRepo()
+        self.addCleanup(repo_helper.cleanup)
+        repo_helper.checkout("main")
+        repo_helper.checkout("ch3/merged-current", create=True)
+        repo_helper.commit("merged", "merged.txt", "merged")
+
+        wt_main = f"{repo_helper.temp_dir.name}/wt_main"
+        repo_helper.create_worktree(wt_main, "main")
+
+        result = SingleBranchResult(branches_to_delete={"ch3/merged-current"})
+        mock_ui = MagicMock()
+        mock_ui.auto_yes = True
+
+        prompt_and_delete_merged(
+            result,
+            auto_delete=True,
+            ui=mock_ui,
+            repo_path=repo_helper.path,
+            target="main",
+        )
+
+        repo = repo_helper.get_pygit2_repo()
+        self.assertNotIn("ch3/merged-current", set(repo.branches.local))
+        self.assertTrue(repo.head_is_detached)
+
     @patch("git_scripts.cmd.rebase.rebase_orchestrator.rebase_continue")
     def test_handle_interactive_conflict_raises_abort_on_exit_without_rollback(
         self, mock_rebase_continue

@@ -256,6 +256,69 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self._assert_parent("fork-test/stem", "fork-test/branch-1")
         self._assert_parent("fork-test/stem", "fork-test/branch-2")
 
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
+    def test_execute_rebase_prefix_deletes_selected_merged_branch_in_worktree(
+        self, mock_push
+    ):
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("ch3/insrc-iii", create=True)
+        self.repo_helper.commit("insrc-iii", "insrc.txt", "insrc")
+        insrc_id = (
+            self.repo_helper.get_pygit2_repo().revparse_single("HEAD").id
+        )
+
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("ch3/quota-service-owners", create=True)
+        self.repo_helper.commit("quota-owners", "quota.txt", "quota")
+
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit("insrc squashed", "insrc.txt", "insrc")
+        self.repo_helper.commit("quota squashed", "quota.txt", "quota")
+
+        self.repo_helper.checkout("ch3/active-branch", create=True)
+        self.repo_helper.commit("active work", "active.txt", "active")
+
+        wt_quota = f"{self.repo_helper.temp_dir.name}/wt_quota"
+        self.repo_helper.create_worktree(wt_quota, "ch3/quota-service-owners")
+
+        ui = mock.MagicMock(spec=UI)
+        ui.auto_yes = False
+        ui.plain = True
+        ui.console = UI(plain=True, auto_yes=False).console
+        ui.pluralize.side_effect = UI(plain=True, auto_yes=False).pluralize
+
+        def on_ask_choice(msg, choices, default=None):
+            del choices
+            if "Delete the 2 fully merged local branches?" in msg:
+                return "Select which to delete"
+            if "Push" in msg:
+                return "Skip all"
+            return default
+
+        ui.ask_choice.side_effect = on_ask_choice
+        ui.ask_checkbox.return_value = ["ch3/quota-service-owners"]
+
+        success = execute_rebase_prefix(
+            repo_path=self.repo_helper.path,
+            prefix="ch3/",
+            target="main",
+            all_worktrees=True,
+            auto_delete=False,
+            ui=ui,
+        )
+
+        self.assertTrue(success)
+        mock_push.assert_not_called()
+        local_branches = set(self.repo_helper.get_pygit2_repo().branches.local)
+        self.assertNotIn("ch3/quota-service-owners", local_branches)
+        self.assertIn("ch3/insrc-iii", local_branches)
+        self.assertEqual(
+            self.repo_helper.get_pygit2_repo()
+            .revparse_single("ch3/insrc-iii")
+            .id,
+            insrc_id,
+        )
+
     def _assert_parent(self, parent_branch: str, child_branch: str):
         # child_branch~1 should equal parent_branch
         parent_hash = self.repo_helper.rev_parse(parent_branch)

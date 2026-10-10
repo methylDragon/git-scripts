@@ -1,5 +1,7 @@
 """Core logic for orchestrating single-branch and batch rebases."""
 
+import time
+
 import pygit2
 from rich.console import Group
 from rich.panel import Panel
@@ -7,6 +9,8 @@ from rich.progress import Progress
 
 from git_scripts.cmd.shared import (
     get_ui_worktree_callbacks,
+    restore_branch,
+    select_branches_to_delete,
 )
 from git_scripts.cmd.shared import (
     prompt_and_push_updated_branches as _prompt_and_push,
@@ -22,6 +26,7 @@ from git_scripts.git.rebase_plan import create_rebase_plan, execute_rebase_plan
 from git_scripts.git.remote import push_branches
 from git_scripts.git.topology import TopologyAnalyzer, sync_colocated_branches
 from git_scripts.git.worktrees import (
+    detach_worktrees,
     is_in_another_worktree,
     is_worktree_busy,
     manage_worktrees,
@@ -450,17 +455,88 @@ def print_batch_summary(ui: UI, result: SingleBranchResult) -> None:
     )
 
 
+def _checkout_target_or_detach(
+    repo_path: str, target: str, branches_to_delete: set[str]
+) -> None:
+    """Moves repo_path off a branch scheduled for deletion."""
+    if (
+        target
+        and target not in branches_to_delete
+        and not is_in_another_worktree(repo_path, target)
+    ):
+        try:
+            run_cmd(["git", "checkout", target], cwd=repo_path)
+            return
+        except GitExecutionError:
+            pass
+
+    try:
+        run_cmd(["git", "checkout", "--detach"], cwd=repo_path)
+    except GitExecutionError:
+        pass
+
+
+def _release_worktrees_for_deletion(
+    repo_path: str,
+    branches_to_delete: set[str],
+    target: str,
+    ui: UI,
+) -> None:
+    """Ensures no branch in branches_to_delete remains checked out."""
+    try:
+        current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
+    except GitExecutionError:
+        current = ""
+
+    if current in branches_to_delete:
+        _checkout_target_or_detach(repo_path, target, branches_to_delete)
+
+    detach_worktrees(
+        repo_path=repo_path,
+        target_branches=list(branches_to_delete),
+        callbacks=get_ui_worktree_callbacks(ui),
+        save_state=False,
+    )
+
+
+def _find_deleted_branches(repo_path: str, candidates: list[str]) -> list[str]:
+    """Returns candidate branches that no longer exist in repo_path."""
+    try:
+        repo = pygit2.Repository(repo_path)
+        remaining = set(repo.branches.local)
+        return [b for b in candidates if b not in remaining]
+    except (KeyError, ValueError, pygit2.GitError):
+        return []
+
+
+def _print_deleted_branches_panel(deleted: list[str], ui: UI) -> None:
+    """Prints the Deleted Branches summary panel."""
+    if not deleted:
+        return
+    deleted_list = "\n".join(f"  [red]- {b}[/red]" for b in deleted)
+    ui.print(
+        Panel(
+            deleted_list,
+            title="[bold red]Deleted Branches[/bold red]",
+            border_style="red",
+            expand=False,
+        )
+    )
+
+
 def prompt_and_delete_merged(
-    result: SingleBranchResult, auto_delete: bool, ui: UI, repo_path: str
-):
+    result: SingleBranchResult,
+    auto_delete: bool,
+    ui: UI,
+    repo_path: str,
+    target: str = "main",
+) -> None:
     """Prompts and deletes merged branches."""
     unique_to_delete = sorted(
         result.branches_to_delete - result.branches_to_keep
     )
     if not unique_to_delete:
         return
-
-    selected_to_delete = []
 
     if auto_delete or ui.auto_yes:
         selected_to_delete = unique_to_delete
@@ -476,50 +552,31 @@ def prompt_and_delete_merged(
                 expand=False,
             )
         )
-
-        action = ui.ask_choice(
-            "❓  Delete the {}?".format(
-                ui.pluralize(
-                    len(unique_to_delete), "fully merged local branch"
-                )
-            ),
-            choices=["Skip all", "Select which to delete", "Delete all"],
+        merged_label = ui.pluralize(
+            len(unique_to_delete), "fully merged local branch"
+        )
+        selected_to_delete = select_branches_to_delete(
+            unique_to_delete,
+            f"❓  Delete the {merged_label}?",
+            f"Select {merged_label} to delete:",
+            ui,
             default="Skip all",
         )
 
-        match action:
-            case "Delete all":
-                selected_to_delete = unique_to_delete
-            case "Select which to delete":
-                selected_to_delete = ui.ask_checkbox(
-                    "Select {} to delete:".format(
-                        ui.pluralize(
-                            len(unique_to_delete), "fully merged local branch"
-                        )
-                    ),
-                    choices=unique_to_delete,
-                )
-            case _:
-                selected_to_delete = []
+    if not selected_to_delete:
+        return
 
-    if selected_to_delete:
-        try:
-            run_cmd(
-                ["git", "branch", "-D"] + selected_to_delete, cwd=repo_path
-            )
-            deleted_list = "\n".join(
-                f"  [red]- {b}[/red]" for b in selected_to_delete
-            )
-            ui.print(
-                Panel(
-                    deleted_list,
-                    title="[bold red]Deleted Branches[/bold red]",
-                    border_style="red",
-                    expand=False,
-                )
-            )
-        except GitExecutionError:
-            pass
+    _release_worktrees_for_deletion(
+        repo_path, set(selected_to_delete), target, ui
+    )
+
+    try:
+        run_cmd(["git", "branch", "-D"] + selected_to_delete, cwd=repo_path)
+        _print_deleted_branches_panel(selected_to_delete, ui)
+    except GitExecutionError as err:
+        ui.print(f"[red]⚠️  Failed to delete branches: {err}[/red]")
+        deleted = _find_deleted_branches(repo_path, selected_to_delete)
+        _print_deleted_branches_panel(deleted, ui)
 
 
 def prompt_and_push_updated_branches(
@@ -532,3 +589,70 @@ def prompt_and_push_updated_branches(
         ui,
         push_fn=push_branches,
     )
+
+
+def _restore_start_branch_or_target(
+    repo_path: str, start_branch: str, target: str
+) -> None:
+    """Restores start_branch if still present, or falls back to target."""
+    if not start_branch:
+        return
+    try:
+        if start_branch in pygit2.Repository(repo_path).branches.local:
+            restore_branch(repo_path, start_branch)
+            return
+    except (KeyError, ValueError, pygit2.GitError):
+        pass
+    _checkout_target_or_detach(repo_path, target, set())
+
+
+def execute_batch_rebase(
+    repo_path: str,
+    branches: list[str],
+    target: str,
+    ui: UI,
+    *,
+    prefix: str = "",
+    start_branch: str = "",
+    all_worktrees: bool = False,
+    auto_delete: bool = False,
+) -> bool:
+    """Runs topology analysis, batch rebase, pruning, and push prompts."""
+    analyzer = TopologyAnalyzer(repo_path, branches)
+    ui.print(f"  [bold]Found {len(analyzer.tips)} stack tips.[/bold]")
+
+    start_time = time.monotonic()
+    analyzer.analyze_obsolescence(
+        target,
+        progress_callback=lambda msg: ui.print(f"  [dim]⏳ {msg}[/dim]"),
+    )
+    elapsed = time.monotonic() - start_time
+    ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
+
+    if all_worktrees:
+        ui.print(
+            "[dim]🔄  Detaching worktrees for cross-worktree rebase...[/dim]"
+        )
+
+    batch_result, completed = rebase_loop(
+        analyzer,
+        repo_path,
+        prefix,
+        target,
+        all_worktrees,
+        ui,
+        set(branches),
+    )
+    if not completed:
+        return False
+
+    print_batch_summary(ui, batch_result)
+    prompt_and_delete_merged(
+        batch_result, auto_delete, ui, repo_path, target=target
+    )
+    _restore_start_branch_or_target(repo_path, start_branch, target)
+
+    prompt_and_push_updated_branches(
+        batch_result.branches_to_keep, repo_path, ui
+    )
+    return len(batch_result.failed_log) == 0

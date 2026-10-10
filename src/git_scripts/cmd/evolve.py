@@ -11,8 +11,8 @@ from git_scripts.cmd.rebase.rebase_orchestrator import (
 from git_scripts.cmd.shared import (
     get_ui_worktree_callbacks,
     prompt_and_push_updated_branches,
+    restore_branch,
 )
-from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
     format_stack_tree,
     get_repo,
@@ -188,14 +188,6 @@ def resolve_and_report_old_hash(
     except (KeyError, ValueError):
         ui.print(f"❌  Error: Invalid old hash '{old_hash}'.")
         return None
-
-
-def _restore_current_branch(repo_path: str, current_branch_name: str) -> None:
-    if current_branch_name:
-        try:
-            run_cmd(["git", "checkout", current_branch_name], cwd=repo_path)
-        except GitExecutionError:
-            pass
 
 
 def _get_orphans(repo, old_hash, new_hash, current_branch_name) -> list[str]:
@@ -412,10 +404,10 @@ def execute_evolve(
             ui,
         )
     except ScriptAbortError:
-        _restore_current_branch(repo_path, current_branch_name)
+        restore_branch(repo_path, current_branch_name)
         return False
 
-    _restore_current_branch(repo_path, current_branch_name)
+    restore_branch(repo_path, current_branch_name)
 
     ans = _print_evolve_summary(ui, success_count, failed_log)
 

@@ -151,7 +151,7 @@ def _process_worktree_branch(
         return
     if prefix and not branch_name.startswith(prefix):
         return
-    if current_wt == toplevel:
+    if toplevel and os.path.abspath(current_wt) == os.path.abspath(toplevel):
         return
 
     if is_worktree_busy(current_wt):
@@ -169,11 +169,13 @@ def _process_worktree_branch(
         failed_branches.add(branch_name)
 
 
-def _detach_worktrees(
+def detach_worktrees(
     prefix: str = "",
     repo_path: str = ".",
     target_branches: list[str] | None = None,
     callbacks: WorktreeLifecycleCallbacks | None = None,
+    *,
+    save_state: bool = True,
 ) -> WorktreeState:
     """Detaches HEAD in all inactive worktrees to free branches.
 
@@ -196,7 +198,7 @@ def _detach_worktrees(
         state = WorktreeState(
             detached_map=detached_map, failed_branches=failed_branches
         )
-        if detached_map:
+        if save_state and detached_map:
             _save_worktree_state(state, repo_path)
         return state
 
@@ -228,8 +230,12 @@ def _detach_worktrees(
     state = WorktreeState(
         detached_map=detached_map, failed_branches=failed_branches
     )
-    _save_worktree_state(state, repo_path)
+    if save_state:
+        _save_worktree_state(state, repo_path)
     return state
+
+
+_detach_worktrees = detach_worktrees
 
 
 def _reattach_worktrees(

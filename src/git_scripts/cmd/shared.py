@@ -6,7 +6,7 @@ import pygit2
 from rich.panel import Panel
 from rich.progress import Progress
 
-from git_scripts.git.core import GitExecutionError
+from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.remote import push_branches, update_target
 from git_scripts.git.topology import (
     get_commit_oid,
@@ -16,6 +16,15 @@ from git_scripts.git.topology import (
 from git_scripts.git.worktrees import WorktreeLifecycleCallbacks
 from git_scripts.models import UpdateTargetResult
 from git_scripts.ui import UI
+
+
+def restore_branch(repo_path: str, branch: str) -> None:
+    """Restores the given local branch if non-empty and still present."""
+    if branch:
+        try:
+            run_cmd(["git", "checkout", branch], cwd=repo_path)
+        except GitExecutionError:
+            pass
 
 
 def get_ui_worktree_callbacks(ui: UI) -> WorktreeLifecycleCallbacks:
