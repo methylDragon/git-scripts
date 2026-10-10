@@ -17,6 +17,7 @@ from git_scripts.cmd.gk_optimize import (
     execute_gk_verify,
 )
 from git_scripts.gk.optimize.config_loader import read_config, write_config
+from git_scripts.gk.optimize.git_wrapper import _rewrite_fetch_args
 from git_scripts.gk.optimize.gitkraken_launcher import write_gitkraken_launcher
 from git_scripts.gk.optimize.models import (
     GkExpectMode,
@@ -267,8 +268,8 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         )
 
         res = execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             config_path=custom_yaml,
             home_dir=home_dir,
             gk_root=home_dir / ".gitkraken",
@@ -289,22 +290,20 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
         custom_yaml = self.tmp_path / "custom.yaml"
+        patterns = [
+            "candidate/2023*",
+            "refs/tags/candidate/2024*",
+            "^refs/tags/candidate/2025*",
+        ]
         write_config(
             GkOptimizerConfig(
-                tags=GkTagConfig(
-                    blocked_fetch_patterns=[
-                        "candidate/2023*",
-                        "refs/tags/candidate/2024*",
-                        "^refs/tags/candidate/2025*",
-                    ]
-                )
+                tags=GkTagConfig(blocked_fetch_patterns=patterns)
             ),
             custom_yaml,
         )
-
         execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             config_path=custom_yaml,
             home_dir=home_dir,
             gk_root=home_dir / ".gitkraken",
@@ -317,9 +316,8 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             .stdout.strip()
             .splitlines()
         )
-        self.assertIn("^refs/tags/candidate/2023*", fetch_specs)
-        self.assertIn("^refs/tags/candidate/2024*", fetch_specs)
-        self.assertIn("^refs/tags/candidate/2025*", fetch_specs)
+        for year in ("2023", "2024", "2025"):
+            self.assertIn(f"^refs/tags/candidate/{year}*", fetch_specs)
 
     def test_execute_gk_install_preserves_worktree_symlinks_and_open_tabs(
         self,
@@ -329,10 +327,9 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             self.repo_helper, self.tmp_path
         )
         home_dir, profile_file, _ = create_fake_gitkraken_home(self.tmp_path)
-
         execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             home_dir=home_dir,
             gk_root=home_dir / ".gitkraken",
         )
@@ -344,7 +341,6 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             ).stdout.strip(),
             "",
         )
-
         prof_after = json.loads(profile_file.read_text(encoding="utf-8"))
         self.assertIn("openTab1", prof_after["repoInitDetails"])
         self.assertIn("openTab2", prof_after["repoInitDetails"])
@@ -358,10 +354,9 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
         gk_root = home_dir / ".gitkraken"
-
         execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             keep_recent_override=5,
             home_dir=home_dir,
             gk_root=gk_root,
@@ -378,18 +373,12 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         )
 
         res_uninstall = execute_gk_uninstall(
-            repo_path=wt_repo,
-            ui=self.ui,
-            home_dir=home_dir,
+            wt_repo, self.ui, home_dir=home_dir
         )
         self.assertTrue(res_uninstall.success)
 
         verify_uninst = execute_gk_verify(
-            repo_path=wt_repo,
-            ui=self.ui,
-            expect=GkExpectMode.UNINSTALLED,
-            home_dir=home_dir,
-            gk_root=gk_root,
+            wt_repo, self.ui, GkExpectMode.UNINSTALLED, home_dir, gk_root
         )
         self.assertTrue(verify_uninst.passed)
         self.assertEqual(
@@ -410,16 +399,18 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
         execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             home_dir=home_dir,
             gk_root=home_dir / ".gitkraken",
         )
 
         gk_git = home_dir / ".config" / "gitkraken-optimizer" / "gitkraken-git"
-        env = dict(os.environ)
-        env["HOME"] = str(home_dir)
-        env["LD_PRELOAD"] = str(self._shared_so_path)
+        env = {
+            **os.environ,
+            "HOME": str(home_dir),
+            "LD_PRELOAD": str(self._shared_so_path),
+        }
         proc = subprocess.run(
             [str(gk_git), "-c", "alias.printenv=!env", "printenv"],
             cwd=str(main_repo),
@@ -440,16 +431,15 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
         execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             keep_recent_override=5,
             home_dir=home_dir,
             gk_root=home_dir / ".gitkraken",
         )
 
         gk_git = home_dir / ".config" / "gitkraken-optimizer" / "gitkraken-git"
-        env = dict(os.environ)
-        env["HOME"] = str(home_dir)
+        env = {**os.environ, "HOME": str(home_dir)}
         ls_proc = subprocess.run(
             [str(gk_git), "ls-remote", "--tags", str(main_repo)],
             cwd=str(wt_repo),
@@ -500,13 +490,12 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             self.repo_helper, self.tmp_path
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
-
         res = execute_gk_verify(
-            repo_path=wt_repo,
-            ui=self.ui,
-            expect=GkExpectMode.INSTALLED,
-            home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
+            wt_repo,
+            self.ui,
+            GkExpectMode.INSTALLED,
+            home_dir,
+            home_dir / ".gitkraken",
         )
         self.assertFalse(res.passed)
         self.assertTrue(
@@ -521,33 +510,23 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             self.repo_helper, self.tmp_path
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
-
-        res = execute_gk_uninstall(
-            repo_path=wt_repo,
-            ui=self.ui,
-            home_dir=home_dir,
-        )
+        res = execute_gk_uninstall(wt_repo, self.ui, home_dir=home_dir)
         self.assertFalse(res.success)
 
-    def test_read_config_loads_custom_yaml_tag_and_watcher_settings(
-        self,
-    ) -> None:
-        """Verifies custom YAML tag and watcher settings load into model."""
+    def test_read_config_loads_custom_yaml_and_overrides_counts(self) -> None:
+        """Verifies custom YAML tag/watcher settings and overrides."""
+        default_dest = self.tmp_path / "default_link.yaml"
+        write_config(GkOptimizerConfig(), default_dest)
+        self.assertTrue(default_dest.is_symlink())
+
         custom_yaml = self.tmp_path / "config.yaml"
         custom_yaml.write_text(
-            "tags:\n"
-            "  keep_other_tags: false\n"
-            "  keep_recent_by_pattern:\n"
-            '    "candidate/*": 9\n'
-            '    "release/*": 7\n'
-            "  blocked_fetch_patterns:\n"
-            '    - "candidate/2023*"\n'
-            "watcher:\n"
-            "  ignored_dirs:\n"
-            '    - "custom_build_dir"\n',
+            "tags:\n  keep_other_tags: false\n  keep_recent_by_pattern:\n"
+            '    "candidate/*": 9\n    "release/*": 7\n'
+            '  blocked_fetch_patterns:\n    - "candidate/2023*"\n'
+            'watcher:\n  ignored_dirs:\n    - "custom_build_dir"\n',
             encoding="utf-8",
         )
-
         parsed = read_config(config_path=custom_yaml)
         self.assertFalse(parsed.tags.keep_other_tags)
         self.assertEqual(
@@ -555,29 +534,9 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             {"candidate/*": 9, "release/*": 7},
         )
         self.assertEqual(
-            parsed.tags.blocked_fetch_patterns,
-            ["candidate/2023*"],
+            parsed.tags.blocked_fetch_patterns, ["candidate/2023*"]
         )
         self.assertEqual(parsed.watcher.ignored_dirs, ["custom_build_dir"])
-
-    def test_read_config_overrides_counts_when_keep_recent_set(
-        self,
-    ) -> None:
-        """Verifies default config symlinks and overrides unlink cleanly."""
-        default_dest = self.tmp_path / "default_link.yaml"
-        write_config(GkOptimizerConfig(), default_dest)
-        self.assertTrue(default_dest.is_symlink())
-
-        custom_yaml = self.tmp_path / "custom.yaml"
-        write_config(
-            GkOptimizerConfig(
-                tags=GkTagConfig(
-                    keep_recent_by_pattern={"candidate/*": 9, "release/*": 7}
-                )
-            ),
-            custom_yaml,
-        )
-        self.assertFalse(custom_yaml.is_symlink())
 
         overridden = read_config(
             config_path=custom_yaml, keep_recent_override=3
@@ -590,7 +549,7 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
     def test_should_prune_tags_respects_interval_and_flood_tripwire(
         self,
     ) -> None:
-        """Verifies 12h cooldown, ISO marker, and packed/loose flood checks."""
+        """Verifies 12h cooldown, ISO marker, and tag/remote flood checks."""
         main_repo, _ = setup_multi_worktree_gk_repo(
             self.repo_helper, self.tmp_path
         )
@@ -603,31 +562,31 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         self.assertIn("T", marker_data["last_prune_iso"])
         self.assertEqual(marker_data["last_pruned_count"], 17)
         self.assertEqual(marker_data["loose_tags_count"], 0)
-
-        self.assertFalse(
-            should_prune_tags(common_git_dir, now_epoch=1000.0 + 3600.0)
-        )
+        self.assertFalse(should_prune_tags(common_git_dir, 1000.0 + 3600.0))
         self.assertTrue(
-            should_prune_tags(common_git_dir, now_epoch=1000.0 + 12.0 * 3600.0)
+            should_prune_tags(common_git_dir, 1000.0 + 12.0 * 3600.0)
         )
 
-        # Loose tag flood (> 5 loose tag files) within cooldown triggers prune.
         loose_dir = common_git_dir / "refs" / "tags" / "release" / "assets"
         loose_dir.mkdir(parents=True, exist_ok=True)
         for i in range(6):
             (loose_dir / f"202609{i:02d}.RC00").write_text(
                 "0" * 40 + "\n", encoding="utf-8"
             )
-        self.assertTrue(
-            should_prune_tags(common_git_dir, now_epoch=1000.0 + 10.0)
-        )
+        self.assertTrue(should_prune_tags(common_git_dir, 1000.0 + 10.0))
 
-        # Reset marker and verify >8KB packed-refs flood also triggers prune.
         record_prune_marker(common_git_dir, now_epoch=2000.0)
         (common_git_dir / "packed-refs").write_bytes(b"a" * 40000)
-        self.assertTrue(
-            should_prune_tags(common_git_dir, now_epoch=2000.0 + 60.0)
-        )
+        self.assertTrue(should_prune_tags(common_git_dir, 2000.0 + 60.0))
+
+        record_prune_marker(common_git_dir, now_epoch=3000.0)
+        rem_dir = common_git_dir / "refs" / "remotes" / "origin" / "platform"
+        rem_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(21):
+            (rem_dir / f"2026-02-{i:02d}").write_text(
+                "0" * 40 + "\n", encoding="utf-8"
+            )
+        self.assertTrue(should_prune_tags(common_git_dir, 3000.0 + 60.0))
 
     def test_snapshot_tag_state_tracks_nested_tag_subdirectories(self) -> None:
         """Verifies _snapshot_tag_state detects changes in nested tag dirs."""
@@ -638,11 +597,9 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         nested_dir = common_git_dir / "refs" / "tags" / "release" / "assets"
         nested_dir.mkdir(parents=True, exist_ok=True)
         before = _snapshot_tag_state(common_git_dir)
-
         future_mtime = before + 5000.0
         os.utime(nested_dir, (future_mtime, future_mtime))
-        after = _snapshot_tag_state(common_git_dir)
-        self.assertEqual(after, future_mtime)
+        self.assertEqual(_snapshot_tag_state(common_git_dir), future_mtime)
 
     def test_execute_gk_install_replaces_stale_negative_fetch_refspecs(
         self,
@@ -652,45 +609,25 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             self.repo_helper, self.tmp_path
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
-        old_yaml = self.tmp_path / "old.yaml"
-        write_config(
-            GkOptimizerConfig(
-                tags=GkTagConfig(
-                    blocked_fetch_patterns=[
-                        "candidate/2023*",
-                        "release/20*",
-                    ]
-                )
-            ),
-            old_yaml,
-        )
-        execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
-            config_path=old_yaml,
-            home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
-        )
-
-        new_yaml = self.tmp_path / "new.yaml"
-        write_config(
-            GkOptimizerConfig(
-                tags=GkTagConfig(
-                    blocked_fetch_patterns=[
-                        "candidate/*",
-                        "release/*",
-                    ]
-                )
-            ),
-            new_yaml,
-        )
-        execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
-            config_path=new_yaml,
-            home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
-        )
+        gk_root = home_dir / ".gitkraken"
+        for fname, globs in (
+            ("old.yaml", ["candidate/2023*", "release/20*"]),
+            ("new.yaml", ["candidate/*", "release/*"]),
+        ):
+            cfg_file = self.tmp_path / fname
+            write_config(
+                GkOptimizerConfig(
+                    tags=GkTagConfig(blocked_fetch_patterns=globs)
+                ),
+                cfg_file,
+            )
+            execute_gk_install(
+                wt_repo,
+                self.ui,
+                config_path=cfg_file,
+                home_dir=home_dir,
+                gk_root=gk_root,
+            )
         fetch_specs = (
             run_git(
                 ["config", "--get-all", "remote.origin.fetch"],
@@ -753,74 +690,42 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
     @staticmethod
     def _write_synthetic_indexed_asar(target_path: Path) -> Path:
         """Writes an indexed Electron ASAR archive with all 3 needles."""
-        pkg = b'{"name": "gitkraken", "version": "12.4.0"}'
-        css = b"transition:var(--expand-detail-panel-transition)"
-        theme = (
-            b'"expand-detail-panel-transition": "flex-grow 250ms ease-in-out"'
+        entries = (
+            ("package.json", b'{"name": "gitkraken", "version": "12.4.0"}'),
+            (
+                "src/css/styles.css",
+                b"transition:var(--expand-detail-panel-transition)",
+            ),
+            (
+                "src/main/static/themeBases/base.jsonc",
+                (
+                    b'"expand-detail-panel-transition": '
+                    b'"flex-grow 250ms ease-in-out"'
+                ),
+            ),
+            (
+                "src/render/static/entryPoints/main/render.bundle.js",
+                (
+                    b'blocking:!0,callSource:"RepoSagas.openRepo'
+                    b' (usingReduxCache)"'
+                ),
+            ),
         )
-        render = (
-            b'blocking:!0,callSource:"RepoSagas.openRepo (usingReduxCache)"'
-        )
-        o_css = len(pkg)
-        o_theme = o_css + len(css)
-        o_render = o_theme + len(theme)
-        header_dict = {
-            "files": {
-                "package.json": {"size": len(pkg), "offset": "0"},
-                "src": {
-                    "files": {
-                        "css": {
-                            "files": {
-                                "styles.css": {
-                                    "size": len(css),
-                                    "offset": str(o_css),
-                                }
-                            }
-                        },
-                        "main": {
-                            "files": {
-                                "static": {
-                                    "files": {
-                                        "themeBases": {
-                                            "files": {
-                                                "base.jsonc": {
-                                                    "size": len(theme),
-                                                    "offset": str(o_theme),
-                                                }
-                                            }
-                                        },
-                                    }
-                                }
-                            }
-                        },
-                        "render": {
-                            "files": {
-                                "static": {
-                                    "files": {
-                                        "entryPoints": {
-                                            "files": {
-                                                "main": {
-                                                    "files": {
-                                                        "render.bundle.js": {
-                                                            "size": len(
-                                                                render
-                                                            ),
-                                                            "offset": str(
-                                                                o_render
-                                                            ),
-                                                        },
-                                                    }
-                                                }
-                                            }
-                                        },
-                                    }
-                                }
-                            }
-                        },
-                    }
-                },
-            }
-        }
+        header_dict: dict[str, object] = {"files": {}}
+        offset = 0
+        payload_parts: list[bytes] = []
+        for rel_path, blob in entries:
+            node: dict[str, object] = header_dict
+            parts = rel_path.split("/")
+            for part in parts[:-1]:
+                files_map = node.setdefault("files", {})
+                assert isinstance(files_map, dict)
+                node = files_map.setdefault(part, {"files": {}})
+            files_map = node.setdefault("files", {})
+            assert isinstance(files_map, dict)
+            files_map[parts[-1]] = {"size": len(blob), "offset": str(offset)}
+            offset += len(blob)
+            payload_parts.append(blob)
         json_bytes = json.dumps(header_dict).encode("utf-8")
         pad_len = (4 - (len(json_bytes) % 4)) % 4
         header_str_sz = len(json_bytes) + 4 + pad_len
@@ -828,13 +733,7 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             "<IIII", 4, header_str_sz + 4, header_str_sz, len(json_bytes)
         )
         target_path.write_bytes(
-            prefix
-            + json_bytes
-            + (b"\x00" * pad_len)
-            + pkg
-            + css
-            + theme
-            + render
+            prefix + json_bytes + (b"\x00" * pad_len) + b"".join(payload_parts)
         )
         return target_path
 
@@ -881,11 +780,12 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             self.repo_helper, self.tmp_path
         )
         home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
+        gk_root = home_dir / ".gitkraken"
         install_ok = execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
+            gk_root=gk_root,
             asar_path=compatible_asar,
         )
         self.assertTrue(
@@ -895,21 +795,21 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             )
         )
         verify_ok = execute_gk_verify(
-            repo_path=wt_repo,
-            ui=self.ui,
-            expect=GkExpectMode.INSTALLED,
-            home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
-            asar_path=compatible_asar,
+            wt_repo,
+            self.ui,
+            GkExpectMode.INSTALLED,
+            home_dir,
+            gk_root,
+            compatible_asar,
         )
         self.assertTrue(verify_ok.passed)
         self.assertTrue(verify_ok.checks["asar_patches_compatible"])
 
         install_res = execute_gk_install(
-            repo_path=wt_repo,
-            ui=self.ui,
+            wt_repo,
+            self.ui,
             home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
+            gk_root=gk_root,
             asar_path=drifted_asar,
         )
         self.assertTrue(
@@ -917,17 +817,173 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
                 "WARNING:" in d and "v13.0.0" in d for d in install_res.details
             )
         )
-
         verify_res = execute_gk_verify(
-            repo_path=wt_repo,
-            ui=self.ui,
-            expect=GkExpectMode.INSTALLED,
-            home_dir=home_dir,
-            gk_root=home_dir / ".gitkraken",
-            asar_path=drifted_asar,
+            wt_repo,
+            self.ui,
+            GkExpectMode.INSTALLED,
+            home_dir,
+            gk_root,
+            drifted_asar,
         )
         self.assertFalse(verify_res.passed)
         self.assertIn("asar_patches_compatible", verify_res.failures)
+
+    def test_execute_gk_install_trims_remote_heads_and_applies_perf_config(
+        self,
+    ) -> None:
+        """Verifies remoteHeadCollectionByRemoteName, commit-graph, and CAS."""
+        main_repo, wt_repo = setup_multi_worktree_gk_repo(
+            self.repo_helper, self.tmp_path
+        )
+        home_dir, _, rs_file = create_fake_gitkraken_home(self.tmp_path)
+        gk_root = home_dir / ".gitkraken"
+        remote_heads = {
+            f"refs/tags/candidate/2026-01-{i:02d}": {"visible": True}
+            for i in range(1, 16)
+        }
+        remote_heads["refs/tags/v1.0.0"] = {"visible": True}
+        remote_heads["refs/heads/main"] = {"visible": True}
+        rs_file.write_text(
+            json.dumps(
+                {"remoteHeadCollectionByRemoteName": {"origin": remote_heads}}
+            ),
+            encoding="utf-8",
+        )
+
+        execute_gk_install(
+            wt_repo,
+            self.ui,
+            keep_recent_override=5,
+            home_dir=home_dir,
+            gk_root=gk_root,
+        )
+        trimmed = json.loads(rs_file.read_text(encoding="utf-8"))
+        origin_after = trimmed["remoteHeadCollectionByRemoteName"]["origin"]
+        self.assertIn("refs/heads/main", origin_after)
+        self.assertIn("refs/tags/v1.0.0", origin_after)
+        self.assertIn("refs/tags/candidate/2026-01-15", origin_after)
+        self.assertNotIn("refs/tags/candidate/2026-01-01", origin_after)
+
+        commit_graph = main_repo / ".git" / "objects" / "info" / "commit-graph"
+        self.assertTrue(commit_graph.is_file())
+        for key in (
+            "core.commitGraph",
+            "core.untrackedCache",
+            "fetch.writeCommitGraph",
+            "fetch.prune",
+        ):
+            val = run_git(
+                ["config", "--local", "--get", key], cwd=str(main_repo)
+            ).stdout.strip()
+            self.assertEqual(val, "true")
+
+        origin_after["refs/tags/candidate/2026-01-01"] = {"visible": False}
+        rs_file.write_text(json.dumps(trimmed), encoding="utf-8")
+        run_git(
+            ["config", "--local", "fetch.prune", "false"], cwd=str(main_repo)
+        )
+
+        execute_gk_uninstall(repo_path=wt_repo, ui=self.ui, home_dir=home_dir)
+        restored = json.loads(rs_file.read_text(encoding="utf-8"))
+        origin_restored = restored["remoteHeadCollectionByRemoteName"][
+            "origin"
+        ]
+        self.assertEqual(
+            origin_restored["refs/tags/candidate/2026-01-01"],
+            {"visible": False},
+        )
+        self.assertEqual(
+            origin_restored["refs/tags/candidate/2026-01-02"],
+            {"visible": True},
+        )
+        self.assertEqual(
+            run_git(
+                ["config", "--local", "--get", "fetch.prune"],
+                cwd=str(main_repo),
+            ).stdout.strip(),
+            "false",
+        )
+
+    def test_execute_gk_install_prunes_remote_branches_with_safety_guards(
+        self,
+    ) -> None:
+        """Verifies remote branch pruning protects active branches/HEADs."""
+        main_repo, wt_repo = setup_multi_worktree_gk_repo(
+            self.repo_helper, self.tmp_path
+        )
+        home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
+        wt_sha = run_git(
+            ["rev-parse", "HEAD"], cwd=str(wt_repo)
+        ).stdout.strip()
+        base_sha = run_git(
+            ["rev-list", "--max-parents=0", "HEAD"], cwd=str(main_repo)
+        ).stdout.strip()
+
+        for i in range(1, 16):
+            sha = wt_sha if i == 3 else base_sha
+            ref = f"refs/remotes/origin/candidate/2026-01-{i:02d}"
+            run_git(["update-ref", ref, sha], cwd=str(main_repo))
+        for ref in ("refs/remotes/origin/main", "refs/remotes/origin/HEAD"):
+            run_git(["update-ref", ref, base_sha], cwd=str(main_repo))
+        run_git(
+            [
+                "config",
+                "--local",
+                "branch.feat/wt1.merge",
+                "refs/heads/candidate/2026-01-02",
+            ],
+            cwd=str(main_repo),
+        )
+
+        execute_gk_install(
+            wt_repo,
+            self.ui,
+            keep_recent_override=5,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+        )
+        fmt_cmd = [
+            "for-each-ref",
+            "--format=%(refname:lstrip=3)",
+            "refs/remotes/origin",
+        ]
+        remotes_after = (
+            run_git(fmt_cmd, cwd=str(main_repo)).stdout.strip().splitlines()
+        )
+        for kept_ref in (
+            "HEAD",
+            "main",
+            "candidate/2026-01-02",
+            "candidate/2026-01-03",
+            "candidate/2026-01-15",
+        ):
+            self.assertIn(kept_ref, remotes_after)
+        self.assertNotIn("candidate/2026-01-01", remotes_after)
+
+        execute_gk_uninstall(repo_path=wt_repo, ui=self.ui, home_dir=home_dir)
+        remotes_restored = (
+            run_git(fmt_cmd, cwd=str(main_repo)).stdout.strip().splitlines()
+        )
+        self.assertIn("candidate/2026-01-01", remotes_restored)
+
+    def test_rewrite_fetch_args_handles_leading_flags_and_branch_names(
+        self,
+    ) -> None:
+        """Verifies _rewrite_fetch_args parses global flags before fetch."""
+        self.assertEqual(
+            _rewrite_fetch_args(
+                ["-c", "color.ui=never", "fetch", "origin", "--tags"]
+            ),
+            ["-c", "color.ui=never", "fetch", "--no-tags", "origin"],
+        )
+        self.assertEqual(
+            _rewrite_fetch_args(["checkout", "fetch"]),
+            ["checkout", "fetch"],
+        )
+        self.assertEqual(
+            _rewrite_fetch_args(["-c", "alias.x=fetch", "status"]),
+            ["-c", "alias.x=fetch", "status"],
+        )
 
 
 if __name__ == "__main__":

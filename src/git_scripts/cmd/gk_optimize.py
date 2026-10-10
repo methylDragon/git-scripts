@@ -31,14 +31,18 @@ from git_scripts.gk.optimize.shim_builder import (
 from git_scripts.gk.optimize.state_manager import (
     apply_fetch_refspecs,
     apply_gk_settings,
+    apply_repo_perf_config,
     get_state_path,
     read_state,
     revert_fetch_refspecs,
     revert_gk_settings,
+    revert_repo_perf_config,
     write_state,
 )
 from git_scripts.gk.optimize.tag_pruner import (
+    analyze_prunable_remote_branches,
     analyze_prunable_tags,
+    prune_remote_branches,
     prune_tags,
     revert_tags,
 )
@@ -93,6 +97,32 @@ def _close_gitkraken_if_requested(close_gitkraken: bool) -> None:
         check=False,
         capture_output=True,
     )
+
+
+def _write_commit_graph(common_git_dir: Path) -> bool:
+    """Writes .git/objects/info/commit-graph for fast rev-list walks."""
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "--git-dir",
+                str(common_git_dir),
+                "commit-graph",
+                "write",
+                "--object-dir",
+                str(common_git_dir / "objects"),
+                "--reachable",
+                "--no-progress",
+            ],
+            cwd=str(common_git_dir),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return proc.returncode == 0
+    except subprocess.SubprocessError:
+        return False
 
 
 def _check_and_report_asar_on_install(
@@ -175,17 +205,30 @@ def execute_gk_install(
     apply_fetch_refspecs(
         common_git_dir, config.tags.blocked_fetch_patterns, state
     )
+    apply_repo_perf_config(common_git_dir, state)
 
     to_prune, kept = analyze_prunable_tags(common_git_dir, config)
+    to_prune_remotes, _ = analyze_prunable_remote_branches(
+        common_git_dir, config
+    )
     backup_refs = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
     pruned_count = prune_tags(common_git_dir, to_prune, backup_refs)
-    record_prune_marker(common_git_dir, pruned_count=pruned_count)
+    remote_pruned = prune_remote_branches(
+        common_git_dir, to_prune_remotes, backup_refs
+    )
+    _write_commit_graph(common_git_dir)
+    record_prune_marker(
+        common_git_dir,
+        pruned_count=pruned_count,
+        remote_pruned_count=remote_pruned,
+    )
 
     cleaned_rs = apply_gk_settings(
         gk_root=effective_gk_root,
         gitkraken_git_path=gk_git,
         kept_tags=set(kept),
         state=state,
+        trim_tags=bool(to_prune or kept),
     )
     write_state(common_git_dir, state)
 
@@ -196,8 +239,8 @@ def execute_gk_install(
         ),
         f"Installed desktop launcher override: {desktop_path}",
         (
-            f"Pruned {pruned_count} historical CI tags; kept {len(kept)} tags"
-            " (100% normal + rolling windows)"
+            f"Pruned {pruned_count} historical CI tags and {remote_pruned}"
+            f" remote branch refs; kept {len(kept)} tags"
         ),
         f"Shrunk {cleaned_rs} GitKraken repoSettings JSON file(s)",
     ]
@@ -215,6 +258,13 @@ def execute_gk_install(
         desktop_entry_path=str(desktop_path),
         details=details,
     )
+
+
+def _unlink_artifacts(paths: tuple[Path, ...]) -> None:
+    """Unlinks any existing files or symlinks in paths."""
+    for artifact in paths:
+        if artifact.is_symlink() or artifact.is_file():
+            artifact.unlink()
 
 
 def execute_gk_uninstall(
@@ -247,33 +297,35 @@ def execute_gk_uninstall(
             details=[msg],
         )
 
+    no_repos_left = unregister_watched_repo(opt_home_dir, common_git_dir)
     state = read_state(common_git_dir)
+    _unlink_artifacts((state_file, get_repo_config_path(common_git_dir)))
+
     revert_fetch_refspecs(common_git_dir, state)
-    revert_gk_settings(state)
+    revert_repo_perf_config(common_git_dir, state)
+    revert_gk_settings(state, revert_profiles=no_repos_left)
 
     backup_refs = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
     restored_count = revert_tags(common_git_dir, backup_refs)
 
-    no_repos_left = unregister_watched_repo(opt_home_dir, common_git_dir)
-    if no_repos_left and desktop_path.is_file():
-        desktop_path.unlink()
+    if no_repos_left:
+        _unlink_artifacts((desktop_path,))
+    _unlink_artifacts(
+        (backup_refs, common_git_dir / "gk-optimizer" / "last_tag_prune.json")
+    )
 
-    for artifact in (
-        state_file,
-        backup_refs,
-        common_git_dir / "gk-optimizer" / "last_tag_prune.json",
-        get_repo_config_path(common_git_dir),
-    ):
-        if artifact.is_symlink() or artifact.is_file():
-            artifact.unlink()
-
+    desktop_msg = (
+        f"Removed XDG desktop override: {desktop_path}"
+        if no_repos_left
+        else "Kept XDG desktop override for remaining watched repositories"
+    )
     details = [
-        f"Restored {restored_count} pruned tag refs via zero-OID CAS",
+        f"Restored {restored_count} pruned tag/remote refs via zero-OID CAS",
         (
             "Reverted GitKraken profile and repoSettings via CAS"
             " (preserving post-install edits)"
         ),
-        f"Removed XDG desktop override: {desktop_path}",
+        desktop_msg,
     ]
     for msg in details:
         ui.print(f"[green]✓[/green] {msg}")
@@ -301,11 +353,14 @@ def _format_last_prune_summary(common_git_dir: Path) -> str | None:
             data.get("last_prune_epoch", "unknown")
         )
         pruned = data.get("last_pruned_count", 0)
+        rem_pruned = data.get("last_remote_pruned_count", 0)
         loose = data.get("loose_tags_count", 0)
+        rem_refs = data.get("remote_refs_count", 0)
         packed_sz = data.get("packed_refs_size", 0)
         return (
             f"last_tag_prune: {iso_time}"
-            f" (pruned={pruned}, loose_tags={loose},"
+            f" (pruned={pruned}, remote_pruned={rem_pruned},"
+            f" loose_tags={loose}, remote_refs={rem_refs},"
             f" packed_refs_bytes={packed_sz})"
         )
     except (OSError, ValueError, TypeError, AttributeError):
@@ -366,6 +421,17 @@ def _print_verify_report(
         ui.print(f"[cyan]INFO[/cyan] {prune_summary}")
 
 
+def _is_rolling_window_enforced(common_git_dir: Path) -> bool:
+    """Returns True if tag and remote branch windows have 0 excess refs."""
+    cfg_file = get_repo_config_path(common_git_dir)
+    config = read_config(cfg_file if cfg_file.is_file() else None)
+    to_prune, _ = analyze_prunable_tags(common_git_dir, config)
+    to_prune_remotes, _ = analyze_prunable_remote_branches(
+        common_git_dir, config
+    )
+    return not to_prune and not to_prune_remotes
+
+
 def execute_gk_verify(
     repo_path: str | Path,
     ui: UI,
@@ -388,10 +454,6 @@ def execute_gk_verify(
     gk_git = opt_home_dir / "gitkraken-git"
     state_file = get_state_path(common_git_dir)
 
-    cfg_file = get_repo_config_path(common_git_dir)
-    config = read_config(cfg_file if cfg_file.is_file() else None)
-    to_prune, _ = analyze_prunable_tags(common_git_dir, config)
-
     checks: dict[str, bool] = {}
     asar_hint: str | None = None
     prune_summary: str | None = None
@@ -405,20 +467,25 @@ def execute_gk_verify(
         )
         checks["desktop_override_present"] = "GitKraken (Optimized)" in dt_text
         checks["saved_state_present"] = state_file.is_file()
-        checks["rolling_tag_window_enforced"] = len(to_prune) == 0
+        checks["rolling_tag_window_enforced"] = _is_rolling_window_enforced(
+            common_git_dir
+        )
         prof_ok = _are_profiles_pointing_to_wrapper(effective_gk_root, gk_git)
         if prof_ok is not None:
             checks["profile_selected_git_path_set"] = prof_ok
         asar_hint = _verify_asar_for_installed_mode(ui, effective_asar, checks)
         prune_summary = _format_last_prune_summary(common_git_dir)
     else:
-        checks["desktop_override_removed"] = not desktop_path.exists()
+        other_repos_watched = (opt_home_dir / "watched_repos.json").is_file()
+        checks["desktop_override_removed"] = (
+            other_repos_watched or not desktop_path.exists()
+        )
         checks["saved_state_removed"] = not state_file.exists()
 
     failures = [name for name, ok in checks.items() if not ok]
     _print_verify_report(ui, checks, asar_hint, prune_summary)
     return GkVerifyResult(
-        passed=len(failures) == 0,
+        passed=not failures,
         checks=checks,
         failures=failures,
     )

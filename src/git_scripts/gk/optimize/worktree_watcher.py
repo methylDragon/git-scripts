@@ -13,7 +13,9 @@ from git_scripts.gk.optimize.config_loader import (
     read_config,
 )
 from git_scripts.gk.optimize.tag_pruner import (
+    analyze_prunable_remote_branches,
     analyze_prunable_tags,
+    prune_remote_branches,
     prune_tags,
 )
 
@@ -143,26 +145,33 @@ def _snapshot_worktree_heads(common_git_dir: Path) -> dict[str, str]:
     return state
 
 
+def _append_dir_mtimes(base_dir: Path, mtimes: list[float]) -> None:
+    """Appends mtimes of base_dir and all nested subdirectories to mtimes."""
+    if not base_dir.is_dir():
+        return
+    for root, _, _ in os.walk(base_dir):
+        try:
+            mtimes.append(Path(root).stat().st_mtime)
+        except OSError:
+            continue
+
+
 def _snapshot_tag_state(common_git_dir: Path) -> float:
-    """Returns a combined mtime marker for packed-refs and all tag dirs."""
+    """Returns a combined mtime marker for packed-refs, tags, and remotes."""
     mtimes: list[float] = []
     packed = common_git_dir / "packed-refs"
     try:
         mtimes.append(packed.stat().st_mtime)
     except OSError:
         pass
-    tags_dir = common_git_dir / "refs" / "tags"
-    if tags_dir.is_dir():
-        for root, _, _ in os.walk(tags_dir):
-            try:
-                mtimes.append(Path(root).stat().st_mtime)
-            except OSError:
-                continue
+    _append_dir_mtimes(common_git_dir / "refs" / "tags", mtimes)
+    _append_dir_mtimes(common_git_dir / "refs" / "remotes", mtimes)
     return max(mtimes) if mtimes else 0.0
 
 
 PACKED_REFS_FLOOD_BYTES = 8192
 LOOSE_TAGS_FLOOD_COUNT = 5
+REMOTE_REFS_FLOOD_COUNT = 20
 
 
 def _get_packed_refs_size(common_git_dir: Path) -> int:
@@ -182,6 +191,44 @@ def _count_loose_tags(common_git_dir: Path) -> int:
     return sum(len(files) for _, _, files in os.walk(tags_dir))
 
 
+def _collect_loose_remote_refs(common_git_dir: Path) -> set[str]:
+    """Returns relative ref paths for loose files under refs/remotes."""
+    remotes_dir = common_git_dir / "refs" / "remotes"
+    if not remotes_dir.is_dir():
+        return set()
+    refs: set[str] = set()
+    for root, _, files in os.walk(remotes_dir):
+        rel_root = Path(root).relative_to(common_git_dir).as_posix()
+        for fname in files:
+            refs.add(f"{rel_root}/{fname}")
+    return refs
+
+
+def _collect_packed_remote_refs(common_git_dir: Path) -> set[str]:
+    """Returns relative ref paths for refs/remotes/* lines in packed-refs."""
+    packed = common_git_dir / "packed-refs"
+    refs: set[str] = set()
+    try:
+        if not packed.is_file():
+            return refs
+        for line in packed.read_text(encoding="utf-8").splitlines():
+            if " refs/remotes/" in line and not line.startswith(("#", "^")):
+                parts = line.split(" ", 1)
+                if len(parts) == 2:
+                    _, ref_name = parts
+                    refs.add(ref_name.strip())
+    except OSError:
+        return refs
+    return refs
+
+
+def _count_remote_refs(common_git_dir: Path) -> int:
+    """Returns the deduplicated count of remote-tracking refs."""
+    loose = _collect_loose_remote_refs(common_git_dir)
+    packed = _collect_packed_remote_refs(common_git_dir)
+    return len(loose | packed)
+
+
 def _format_epoch_iso(epoch: float) -> str:
     """Formats a Unix timestamp as a local timezone ISO-8601 string."""
     return (
@@ -195,8 +242,9 @@ def record_prune_marker(
     common_git_dir: Path,
     now_epoch: float | None = None,
     pruned_count: int = 0,
+    remote_pruned_count: int = 0,
 ) -> Path:
-    """Writes prune timestamp, count, and ref stats to last_tag_prune.json."""
+    """Writes prune timestamp, counts, and ref stats to last_tag_prune.json."""
     marker = common_git_dir / "gk-optimizer" / "last_tag_prune.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
     epoch = now_epoch if now_epoch is not None else time.time()
@@ -204,8 +252,10 @@ def record_prune_marker(
         "last_prune_epoch": epoch,
         "last_prune_iso": _format_epoch_iso(epoch),
         "last_pruned_count": int(pruned_count),
+        "last_remote_pruned_count": int(remote_pruned_count),
         "loose_tags_count": _count_loose_tags(common_git_dir),
         "packed_refs_size": _get_packed_refs_size(common_git_dir),
+        "remote_refs_count": _count_remote_refs(common_git_dir),
     }
     marker.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -218,7 +268,7 @@ def should_prune_tags(
     common_git_dir: Path,
     now_epoch: float | None = None,
 ) -> bool:
-    """Returns True if interval elapsed or packed/loose tag refs spiked."""
+    """Returns True if interval elapsed or tag/remote refs spiked."""
     marker = common_git_dir / "gk-optimizer" / "last_tag_prune.json"
     if not marker.is_file():
         return True
@@ -227,6 +277,8 @@ def should_prune_tags(
         last_epoch = float(data.get("last_prune_epoch", 0.0))
         last_size = int(data.get("packed_refs_size", 0))
         last_loose = int(data.get("loose_tags_count", 0))
+        raw_remote = data.get("remote_refs_count")
+        last_remote = int(raw_remote) if raw_remote is not None else None
     except (OSError, ValueError, TypeError, AttributeError):
         return True
 
@@ -235,6 +287,12 @@ def should_prune_tags(
     if (
         packed_delta > PACKED_REFS_FLOOD_BYTES
         or loose_delta > LOOSE_TAGS_FLOOD_COUNT
+    ):
+        return True
+    if (
+        last_remote is not None
+        and (_count_remote_refs(common_git_dir) - last_remote)
+        > REMOTE_REFS_FLOOD_COUNT
     ):
         return True
 
@@ -246,22 +304,43 @@ def should_prune_tags(
 
 
 def prune_excess_tags(common_git_dir: Path) -> int:
-    """Prunes (N+1)th+ tags if any prefix exceeds its rolling window."""
+    """Prunes (N+1)th+ tags and remote pattern refs exceeding the window."""
     cfg_path = get_repo_config_path(common_git_dir)
     config = read_config(cfg_path if cfg_path.is_file() else None)
     to_prune, _ = analyze_prunable_tags(common_git_dir, config)
-    if not to_prune:
+    to_prune_remotes, _ = analyze_prunable_remote_branches(
+        common_git_dir, config
+    )
+    if not to_prune and not to_prune_remotes:
         record_prune_marker(common_git_dir, pruned_count=0)
         return 0
     backup_file = common_git_dir / "gk-optimizer" / "pre_install_refs.json"
-    pruned = prune_tags(common_git_dir, to_prune, backup_file=backup_file)
-    record_prune_marker(common_git_dir, pruned_count=pruned)
-    return pruned
+    pruned_tags = prune_tags(common_git_dir, to_prune, backup_file=backup_file)
+    pruned_remotes = prune_remote_branches(
+        common_git_dir, to_prune_remotes, backup_file=backup_file
+    )
+    record_prune_marker(
+        common_git_dir,
+        pruned_count=pruned_tags,
+        remote_pruned_count=pruned_remotes,
+    )
+    return pruned_tags + pruned_remotes
+
+
+def _is_repo_installed(git_dir: Path) -> bool:
+    """Returns True if git_dir has an active gk-optimizer state or config."""
+    opt_dir = git_dir / "gk-optimizer"
+    return (opt_dir / "state.yaml").is_file() or get_repo_config_path(
+        git_dir
+    ).exists()
 
 
 def _load_watched_git_dirs(primary_git_dir: Path) -> list[Path]:
     """Returns deduplicated list of registered common_git_dirs to watch."""
-    dirs: list[Path] = [primary_git_dir.resolve()]
+    resolved_primary = primary_git_dir.resolve()
+    dirs: list[Path] = (
+        [resolved_primary] if _is_repo_installed(resolved_primary) else []
+    )
     repos_file = (
         Path.home() / ".config" / "gitkraken-optimizer" / "watched_repos.json"
     )
@@ -275,7 +354,11 @@ def _load_watched_git_dirs(primary_git_dir: Path) -> list[Path]:
         return dirs
     for raw in data["repos"]:
         candidate = Path(str(raw)).resolve()
-        if candidate.is_dir() and candidate not in dirs:
+        if (
+            candidate.is_dir()
+            and _is_repo_installed(candidate)
+            and candidate not in dirs
+        ):
             dirs.append(candidate)
     return dirs
 
@@ -286,6 +369,8 @@ def _poll_single_repo(
     prev_tag_by_repo: dict[Path, float],
 ) -> None:
     """Checks worktree HEAD changes and lazy tag prune conditions."""
+    if not _is_repo_installed(git_dir):
+        return
     prev_wt = prev_wt_by_repo.get(git_dir, {})
     _recover_nudge_dirs(git_dir / "worktrees")
     cur_wt = _snapshot_worktree_heads(git_dir)

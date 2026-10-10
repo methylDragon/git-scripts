@@ -166,21 +166,53 @@ def _filter_ls_remote_tags(raw_stdout: str) -> str:
     return "\n".join(out_lines) + ("\n" if out_lines else "")
 
 
+GLOBAL_VALUE_FLAGS = frozenset(
+    {
+        "-c",
+        "-C",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--config-env",
+    }
+)
+
+
+def _find_git_subcommand_index(args: list[str]) -> tuple[int, str]:
+    """Returns (index, subcommand) skipping leading global Git flags."""
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token == "--":
+            break
+        if token in GLOBAL_VALUE_FLAGS:
+            idx += 2
+            continue
+        if token.startswith("-"):
+            idx += 1
+            continue
+        return idx, token
+    return -1, ""
+
+
 def _rewrite_fetch_args(args: list[str]) -> list[str]:
     """Strips `--tags`/`-t` and injects `--no-tags` on `git fetch` calls."""
-    if "fetch" not in args:
+    sub_idx, sub_cmd = _find_git_subcommand_index(args)
+    if sub_cmd != "fetch":
         return args
-    cleaned = [a for a in args if a not in ("--tags", "-t")]
-    if "--no-tags" not in cleaned:
-        fetch_idx = cleaned.index("fetch")
-        cleaned.insert(fetch_idx + 1, "--no-tags")
-    return cleaned
+    prefix = args[: sub_idx + 1]
+    rest = [a for a in args[sub_idx + 1 :] if a not in ("--tags", "-t")]
+    if "--no-tags" not in rest:
+        rest.insert(0, "--no-tags")
+    return prefix + rest
 
 
 def main() -> None:
     """Intercepts `ls-remote --tags` and `fetch`, passing others via execv."""
     args = sys.argv[1:]
-    if "ls-remote" in args and ("--tags" in args or "-t" in args):
+    _, sub_cmd = _find_git_subcommand_index(args)
+    if sub_cmd == "ls-remote" and ("--tags" in args or "-t" in args):
         proc = subprocess.run(
             [REAL_GIT, *args],
             capture_output=True,

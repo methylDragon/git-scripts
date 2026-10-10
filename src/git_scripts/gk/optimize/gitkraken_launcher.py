@@ -13,13 +13,28 @@ def get_wrapper_template_path() -> Path:
 
 
 def write_git_wrapper(dest_dir: Path) -> Path:
-    """Installs the `gitkraken-git` wrapper used for `selectedGitPath`."""
+    """Installs `/bin/sh` fast-path `gitkraken-git` and `git_wrapper.py`."""
     dest_dir.mkdir(parents=True, exist_ok=True)
-    wrapper_path = dest_dir / "gitkraken-git"
+    py_wrapper_path = dest_dir / "git_wrapper.py"
     body = get_wrapper_template_path().read_text(encoding="utf-8")
     if not body.startswith("#!"):
         body = "#!/usr/bin/env python3\n" + body
-    wrapper_path.write_text(body, encoding="utf-8")
+    py_wrapper_path.write_text(body, encoding="utf-8")
+    py_wrapper_path.chmod(0o755)
+
+    wrapper_path = dest_dir / "gitkraken-git"
+    sh_script = f"""#!/bin/sh
+unset LD_PRELOAD
+for arg in "$@"; do
+    case "$arg" in
+        fetch|ls-remote)
+            exec python3 "{py_wrapper_path}" "$@"
+            ;;
+    esac
+done
+exec /usr/bin/git "$@"
+"""
+    wrapper_path.write_text(sh_script, encoding="utf-8")
     wrapper_path.chmod(0o755)
     return wrapper_path
 
