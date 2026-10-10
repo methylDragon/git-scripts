@@ -11,11 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
-
 REAL_GIT = "/usr/bin/git"
 # Clear LD_PRELOAD so child git processes do not inherit the Electron shim.
 os.environ.pop("LD_PRELOAD", None)
@@ -25,20 +20,6 @@ def _natural_key(tag_name: str) -> tuple[int | str, ...]:
     """Tokenizes numeric segments as integers for natural version sorting."""
     parts = re.split(r"(\d+)", tag_name)
     return tuple(int(p) if p.isdigit() else p for p in parts)
-
-
-def _parse_yaml_with_pyyaml(raw_text: str) -> dict[str, int] | None:
-    """Parses `tags.keep_recent_by_pattern` using PyYAML when available."""
-    if yaml is None:
-        return None
-    try:
-        data = yaml.safe_load(raw_text) or {}
-        windows = data.get("tags", {}).get("keep_recent_by_pattern")
-        if isinstance(windows, dict):
-            return {str(k): int(v) for k, v in windows.items()}
-    except (ValueError, TypeError, AttributeError):
-        pass
-    return None
 
 
 def _parse_keep_recent_kv(stripped: str) -> tuple[str, int] | None:
@@ -54,11 +35,7 @@ def _parse_keep_recent_kv(stripped: str) -> tuple[str, int] | None:
 
 
 def _parse_simple_keep_recent_yaml(raw_text: str) -> dict[str, int] | None:
-    """Parses `tags.keep_recent_by_pattern` with a stdlib fallback."""
-    pyyaml_result = _parse_yaml_with_pyyaml(raw_text)
-    if pyyaml_result is not None:
-        return pyyaml_result
-
+    """Parses `tags.keep_recent_by_pattern` using the standard library."""
     parsed: dict[str, int] = {}
     in_keep_block = False
     for line in raw_text.splitlines():
@@ -76,7 +53,8 @@ def _parse_simple_keep_recent_yaml(raw_text: str) -> dict[str, int] | None:
             break
         kv = _parse_keep_recent_kv(stripped)
         if kv is not None:
-            parsed[kv[0]] = kv[1]
+            pattern, count = kv
+            parsed[pattern] = count
     return parsed or None
 
 

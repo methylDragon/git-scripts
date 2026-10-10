@@ -17,9 +17,10 @@
  *      file descriptor whose `(st_dev, st_ino)` matches `app.asar`, libc first
  *      populates the caller's `void *buf` in RAM. Before returning to Electron,
  *      `patch_asar_buffer()` scans `buf` with `memmem()` and overwrites the
- *      commit detail panel transition variable (`base.jsonc`) and flexbox rule
- *      (`styles.css`) in-place with equal-length byte sequences so ASAR header
- *      offsets stay valid.
+ *      commit detail panel transition variable (`base.jsonc`), flexbox rule
+ *      (`styles.css`), and cached tab-switch refresh mode (`render.bundle.js`)
+ *      in-place with equal-length byte sequences so ASAR header offsets stay
+ *      valid.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -51,6 +52,11 @@ typedef ssize_t (*read_fn_t)(int, void *, size_t);
  *     transition.
  *   - `GK_THEME_*` (63 bytes): patches `src/main/static/themeBases/base.jsonc`
  *     (padded with spaces) so all built-in themes emit `transition: none`.
+ *   - `GK_CACHED_REFRESH_*` (61 bytes): patches `openRepoSaga` in
+ *     `src/render/static/entryPoints/main/render.bundle.js` so switching back
+ *     to an already-cached tab runs `refreshRepo` in the background
+ *     (`blocking:!1`) instead of holding the `"Opening repo"` overlay up for
+ *     the full 9-step refresh.
  * Each replacement must match its needle's exact byte length so file offsets in
  * the `app.asar` JSON header never shift.
  */
@@ -58,6 +64,8 @@ typedef ssize_t (*read_fn_t)(int, void *, size_t);
 #define GK_CSS_REPLACEMENT "min-width:0;overflow:hidden;transition:none/***/"
 #define GK_THEME_NEEDLE "\"expand-detail-panel-transition\": \"flex-grow 250ms ease-in-out\""
 #define GK_THEME_REPLACEMENT "\"expand-detail-panel-transition\": \"none\"                       "
+#define GK_CACHED_REFRESH_NEEDLE "blocking:!0,callSource:\"RepoSagas.openRepo (usingReduxCache)\""
+#define GK_CACHED_REFRESH_REPLACEMENT "blocking:!1,callSource:\"RepoSagas.openRepo (usingReduxCache)\""
 
 _Static_assert(
     sizeof(GK_CSS_NEEDLE) == sizeof(GK_CSS_REPLACEMENT),
@@ -66,6 +74,10 @@ _Static_assert(
 _Static_assert(
     sizeof(GK_THEME_NEEDLE) == sizeof(GK_THEME_REPLACEMENT),
     "GK_THEME_NEEDLE and GK_THEME_REPLACEMENT must have identical byte length"
+);
+_Static_assert(
+    sizeof(GK_CACHED_REFRESH_NEEDLE) == sizeof(GK_CACHED_REFRESH_REPLACEMENT),
+    "GK_CACHED_REFRESH_NEEDLE and GK_CACHED_REFRESH_REPLACEMENT must have identical byte length"
 );
 
 /* Calls libc stat64/xstat64 directly via RTLD_NEXT. */
@@ -166,9 +178,10 @@ static void replace_all_in_buffer(
     }
 }
 
-/* Applies the in-memory CSS and theme variable patches to `app.asar` buffers. */
+/* Applies the in-memory CSS, theme, and cached-refresh patches to `app.asar` buffers. */
 static void patch_asar_buffer(void *buf, ssize_t nread) {
     const size_t css_len = sizeof(GK_CSS_NEEDLE) - 1;
+    const size_t cached_refresh_len = sizeof(GK_CACHED_REFRESH_NEEDLE) - 1;
     const size_t theme_len = sizeof(GK_THEME_NEEDLE) - 1;
     if (buf == NULL || nread < (ssize_t)css_len) {
         return;
@@ -176,6 +189,15 @@ static void patch_asar_buffer(void *buf, ssize_t nread) {
     replace_all_in_buffer(
         buf, (size_t)nread, GK_CSS_NEEDLE, GK_CSS_REPLACEMENT, css_len
     );
+    if ((size_t)nread >= cached_refresh_len) {
+        replace_all_in_buffer(
+            buf,
+            (size_t)nread,
+            GK_CACHED_REFRESH_NEEDLE,
+            GK_CACHED_REFRESH_REPLACEMENT,
+            cached_refresh_len
+        );
+    }
     if ((size_t)nread >= theme_len) {
         replace_all_in_buffer(
             buf, (size_t)nread, GK_THEME_NEEDLE, GK_THEME_REPLACEMENT, theme_len
@@ -510,4 +532,3 @@ ssize_t read(int fd, void *buf, size_t count) {
     }
     return nread;
 }
-

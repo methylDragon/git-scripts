@@ -23,7 +23,11 @@ from git_scripts.gk.optimize.models import (
     GkOptimizeResult,
     GkVerifyResult,
 )
-from git_scripts.gk.optimize.shim_builder import build_shim
+from git_scripts.gk.optimize.shim_builder import (
+    DEFAULT_ASAR_PATH,
+    build_shim,
+    verify_asar_compatibility,
+)
 from git_scripts.gk.optimize.state_manager import (
     apply_fetch_refspecs,
     apply_gk_settings,
@@ -91,6 +95,34 @@ def _close_gitkraken_if_requested(close_gitkraken: bool) -> None:
     )
 
 
+def _check_and_report_asar_on_install(
+    ui: UI,
+    asar_path: Path,
+    details: list[str],
+) -> None:
+    """Checks app.asar compatibility on install and warns on needle drift."""
+    if not asar_path.is_file():
+        return
+    compat = verify_asar_compatibility(asar_path)
+    if compat.compatible:
+        ver_str = (
+            f"v{compat.detected_version}"
+            if compat.detected_version
+            else "unknown"
+        )
+        count = len(compat.matched_patches)
+        msg = (
+            f"Verified app.asar compatibility (GitKraken {ver_str};"
+            f" {count}/{count} in-memory patches matched)"
+        )
+        details.append(msg)
+        ui.print(f"[green]✓[/green] {msg}")
+        return
+    if compat.remediation_hint:
+        details.append(f"WARNING: {compat.remediation_hint}")
+        ui.print(f"[yellow]! WARNING: {compat.remediation_hint}[/yellow]")
+
+
 def execute_gk_install(
     repo_path: str | Path,
     ui: UI,
@@ -99,11 +131,13 @@ def execute_gk_install(
     close_gitkraken: bool = False,
     home_dir: Path | None = None,
     gk_root: Path | None = None,
+    asar_path: Path | None = None,
 ) -> GkOptimizeResult:
-    """Installs all 3 GitKraken worktree optimizations and CAS state."""
+    """Installs GitKraken worktree optimizations and verifies ASAR targets."""
     base_home = home_dir if home_dir is not None else Path.home()
     default_gk = base_home / ".gitkraken"
     effective_gk_root = gk_root if gk_root is not None else default_gk
+    effective_asar = asar_path if asar_path is not None else DEFAULT_ASAR_PATH
     opt_home_dir = base_home / ".config" / "gitkraken-optimizer"
     apps_dir = base_home / ".local" / "share" / "applications"
 
@@ -157,8 +191,8 @@ def execute_gk_install(
 
     details = [
         (
-            "Built & installed preload runtime shim"
-            f" (NSFW & UI patcher): {shim_so}"
+            "Built and installed preload runtime shim"
+            f" (NSFW and UI patcher): {shim_so}"
         ),
         f"Installed desktop launcher override: {desktop_path}",
         (
@@ -169,6 +203,7 @@ def execute_gk_install(
     ]
     for msg in details:
         ui.print(f"[green]✓[/green] {msg}")
+    _check_and_report_asar_on_install(ui, effective_asar, details)
 
     return GkOptimizeResult(
         success=True,
@@ -235,7 +270,7 @@ def execute_gk_uninstall(
     details = [
         f"Restored {restored_count} pruned tag refs via zero-OID CAS",
         (
-            "Reverted GitKraken profile & repoSettings via CAS"
+            "Reverted GitKraken profile and repoSettings via CAS"
             " (preserving post-install edits)"
         ),
         f"Removed XDG desktop override: {desktop_path}",
@@ -277,20 +312,76 @@ def _format_last_prune_summary(common_git_dir: Path) -> str | None:
         return None
 
 
+def _verify_asar_for_installed_mode(
+    ui: UI,
+    asar_path: Path,
+    checks: dict[str, bool],
+) -> str | None:
+    """Populates asar_patches_compatible check and returns optional warning."""
+    if not asar_path.is_file():
+        return None
+    compat = verify_asar_compatibility(asar_path)
+    checks["asar_patches_compatible"] = compat.compatible
+    if compat.compatible and compat.detected_version:
+        count = len(compat.matched_patches)
+        ui.print(
+            f"[cyan]INFO[/cyan] gitkraken_version: v{compat.detected_version}"
+            f" ({count}/{count} app.asar patches matched)"
+        )
+        return None
+    return compat.remediation_hint
+
+
+def _are_profiles_pointing_to_wrapper(
+    gk_root: Path,
+    gk_git: Path,
+) -> bool | None:
+    """Returns True if all GitKraken profiles set selectedGitPath to gk_git."""
+    profiles_dir = gk_root / "profiles"
+    if not profiles_dir.is_dir():
+        return None
+    profile_files = list(profiles_dir.glob("*/profile"))
+    if not profile_files:
+        return None
+    return all(
+        json.loads(p.read_text(encoding="utf-8")).get("selectedGitPath")
+        == str(gk_git)
+        for p in profile_files
+    )
+
+
+def _print_verify_report(
+    ui: UI,
+    checks: dict[str, bool],
+    asar_hint: str | None,
+    prune_summary: str | None = None,
+) -> None:
+    """Prints PASS/FAIL check statuses, ASAR warnings, and prune summary."""
+    for name, ok in checks.items():
+        mark = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
+        ui.print(f"{mark} {name}")
+    if asar_hint:
+        ui.print(f"[yellow]WARN[/yellow] {asar_hint}")
+    if prune_summary:
+        ui.print(f"[cyan]INFO[/cyan] {prune_summary}")
+
+
 def execute_gk_verify(
     repo_path: str | Path,
     ui: UI,
     expect: GkExpectMode = GkExpectMode.INSTALLED,
     home_dir: Path | None = None,
     gk_root: Path | None = None,
+    asar_path: Path | None = None,
 ) -> GkVerifyResult:
     """Verifies whether git-gk-optimize is cleanly installed or uninstalled."""
     base_home = home_dir if home_dir is not None else Path.home()
-    default_gk = base_home / ".gitkraken"
-    effective_gk_root = gk_root if gk_root is not None else default_gk
+    effective_gk_root = (
+        gk_root if gk_root is not None else base_home / ".gitkraken"
+    )
+    effective_asar = asar_path if asar_path is not None else DEFAULT_ASAR_PATH
     opt_home_dir = base_home / ".config" / "gitkraken-optimizer"
-    apps_rel = Path(".local/share/applications/gitkraken.desktop")
-    desktop_path = base_home / apps_rel
+    desktop_path = base_home / ".local/share/applications/gitkraken.desktop"
 
     _, common_git_dir = resolve_repo_and_common_git_dir(repo_path)
     shim_so = opt_home_dir / "libgk_preload_shim.so"
@@ -302,39 +393,32 @@ def execute_gk_verify(
     to_prune, _ = analyze_prunable_tags(common_git_dir, config)
 
     checks: dict[str, bool] = {}
+    asar_hint: str | None = None
+    prune_summary: str | None = None
     if expect == GkExpectMode.INSTALLED:
         checks["shim_so_built (libgk_preload_shim.so)"] = shim_so.is_file()
         checks["gitkraken_git_executable"] = gk_git.is_file()
-        dt_ok = desktop_path.is_file()
-        dt_text = desktop_path.read_text(encoding="utf-8") if dt_ok else ""
+        dt_text = (
+            desktop_path.read_text(encoding="utf-8")
+            if desktop_path.is_file()
+            else ""
+        )
         checks["desktop_override_present"] = "GitKraken (Optimized)" in dt_text
         checks["saved_state_present"] = state_file.is_file()
         checks["rolling_tag_window_enforced"] = len(to_prune) == 0
-        profile_files = (
-            list((effective_gk_root / "profiles").glob("*/profile"))
-            if (effective_gk_root / "profiles").is_dir()
-            else []
-        )
-        if profile_files:
-            checks["profile_selected_git_path_set"] = all(
-                json.loads(p.read_text(encoding="utf-8")).get(
-                    "selectedGitPath",
-                )
-                == str(gk_git)
-                for p in profile_files
-            )
+        prof_ok = _are_profiles_pointing_to_wrapper(effective_gk_root, gk_git)
+        if prof_ok is not None:
+            checks["profile_selected_git_path_set"] = prof_ok
+        asar_hint = _verify_asar_for_installed_mode(ui, effective_asar, checks)
+        prune_summary = _format_last_prune_summary(common_git_dir)
     else:
         checks["desktop_override_removed"] = not desktop_path.exists()
         checks["saved_state_removed"] = not state_file.exists()
 
     failures = [name for name, ok in checks.items() if not ok]
-    passed = len(failures) == 0
-    for name, ok in checks.items():
-        mark = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
-        ui.print(f"{mark} {name}")
-    if expect == GkExpectMode.INSTALLED:
-        prune_summary = _format_last_prune_summary(common_git_dir)
-        if prune_summary:
-            ui.print(f"[cyan]INFO[/cyan] {prune_summary}")
-
-    return GkVerifyResult(passed=passed, checks=checks, failures=failures)
+    _print_verify_report(ui, checks, asar_hint, prune_summary)
+    return GkVerifyResult(
+        passed=len(failures) == 0,
+        checks=checks,
+        failures=failures,
+    )

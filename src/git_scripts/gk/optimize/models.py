@@ -81,3 +81,16 @@ class GkVerifyResult:
     passed: bool
     checks: dict[str, bool]
     failures: list[str]
+
+
+@dataclass(frozen=True)
+class AsarCompatibilityResult:
+    """Result of checking app.asar compatibility with preload shim patches."""
+
+    compatible: bool
+    asar_exists: bool
+    detected_version: str | None
+    supported_versions: str
+    matched_patches: list[str]
+    missing_patches: list[str]
+    remediation_hint: str | None = None

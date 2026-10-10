@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import stat as stat_mod
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,7 +23,11 @@ from git_scripts.gk.optimize.models import (
     GkOptimizerConfig,
     GkTagConfig,
 )
-from git_scripts.gk.optimize.shim_builder import build_shim
+from git_scripts.gk.optimize.shim_builder import (
+    SUPPORTED_GK_VERSIONS,
+    build_shim,
+    verify_asar_compatibility,
+)
 from git_scripts.gk.optimize.worktree_watcher import (
     _snapshot_tag_state,
     _snapshot_worktree_heads,
@@ -133,7 +138,7 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
     def test_nsfw_shim_patches_asar_css_and_theme_in_memory_via_read_and_pread(
         self,
     ) -> None:
-        """Verifies read/pread on app.asar patch styles.css and base.jsonc."""
+        """Verifies read/pread on app.asar patch UI CSS and cached refresh."""
         fake_asar = self.tmp_path / "fake_app.asar"
         original_payload = (
             b".right-panel .inner-right-panel{min-height:0;z-index:4;"
@@ -141,6 +146,9 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             b"transition:var(--expand-detail-panel-transition)}\n"
             b'  "expand-detail-panel-transition": '
             b'"flex-grow 250ms ease-in-out",\n'
+            b"yield ln.call(Fs.refreshRepo,{activateRefreshSystem:!0,"
+            b'blocking:!0,callSource:"RepoSagas.openRepo (usingReduxCache)",'
+            b"giveUpOnRefreshThrow:!0})\n"
         )
         fake_asar.write_bytes(original_payload)
 
@@ -163,6 +171,9 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
             check=True,
         )
         result = json.loads(proc.stdout.strip())
+        expected_cached = (
+            'blocking:!1,callSource:"RepoSagas.openRepo (usingReduxCache)"'
+        )
         for key in ("read", "pread"):
             self.assertIn(
                 "min-width:0;overflow:hidden;transition:none/***/",
@@ -172,6 +183,7 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
                 '"expand-detail-panel-transition": "none"',
                 result[key],
             )
+            self.assertIn(expected_cached, result[key])
             self.assertEqual(
                 len(result[key].encode("utf-8")),
                 len(original_payload),
@@ -737,6 +749,185 @@ class TestCmdGkOptimize(parameterized.TestCase):  # pylint: disable=too-many-pub
         self.assertIn(
             'exec /usr/share/gitkraken/gitkraken "$@"', launcher_text
         )
+
+    @staticmethod
+    def _write_synthetic_indexed_asar(target_path: Path) -> Path:
+        """Writes an indexed Electron ASAR archive with all 3 needles."""
+        pkg = b'{"name": "gitkraken", "version": "12.4.0"}'
+        css = b"transition:var(--expand-detail-panel-transition)"
+        theme = (
+            b'"expand-detail-panel-transition": "flex-grow 250ms ease-in-out"'
+        )
+        render = (
+            b'blocking:!0,callSource:"RepoSagas.openRepo (usingReduxCache)"'
+        )
+        o_css = len(pkg)
+        o_theme = o_css + len(css)
+        o_render = o_theme + len(theme)
+        header_dict = {
+            "files": {
+                "package.json": {"size": len(pkg), "offset": "0"},
+                "src": {
+                    "files": {
+                        "css": {
+                            "files": {
+                                "styles.css": {
+                                    "size": len(css),
+                                    "offset": str(o_css),
+                                }
+                            }
+                        },
+                        "main": {
+                            "files": {
+                                "static": {
+                                    "files": {
+                                        "themeBases": {
+                                            "files": {
+                                                "base.jsonc": {
+                                                    "size": len(theme),
+                                                    "offset": str(o_theme),
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                        "render": {
+                            "files": {
+                                "static": {
+                                    "files": {
+                                        "entryPoints": {
+                                            "files": {
+                                                "main": {
+                                                    "files": {
+                                                        "render.bundle.js": {
+                                                            "size": len(
+                                                                render
+                                                            ),
+                                                            "offset": str(
+                                                                o_render
+                                                            ),
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        }
+        json_bytes = json.dumps(header_dict).encode("utf-8")
+        pad_len = (4 - (len(json_bytes) % 4)) % 4
+        header_str_sz = len(json_bytes) + 4 + pad_len
+        prefix = struct.pack(
+            "<IIII", 4, header_str_sz + 4, header_str_sz, len(json_bytes)
+        )
+        target_path.write_bytes(
+            prefix
+            + json_bytes
+            + (b"\x00" * pad_len)
+            + pkg
+            + css
+            + theme
+            + render
+        )
+        return target_path
+
+    def test_verify_asar_compatibility_reports_matching_and_drifted_patches(
+        self,
+    ) -> None:
+        """Verifies ASAR compatibility detects version and patch drift."""
+        compatible_asar = self._write_synthetic_indexed_asar(
+            self.tmp_path / "compatible_app.asar"
+        )
+        missing_res = verify_asar_compatibility(self.tmp_path / "missing.asar")
+        self.assertFalse(missing_res.compatible)
+        self.assertFalse(missing_res.asar_exists)
+        self.assertEqual(len(missing_res.missing_patches), 3)
+
+        ok_res = verify_asar_compatibility(compatible_asar)
+        self.assertTrue(ok_res.compatible)
+        self.assertEqual(ok_res.detected_version, "12.4.0")
+        self.assertEqual(len(ok_res.matched_patches), 3)
+        self.assertEqual(ok_res.missing_patches, [])
+        self.assertIsNone(ok_res.remediation_hint)
+
+        drifted_asar = self.tmp_path / "drifted_app.asar"
+        drifted_asar.write_bytes(
+            b'{"name": "gitkraken", "version": "13.0.0"}\n'
+            b"transition:var(--expand-detail-panel-transition)\n"
+            b'"expand-detail-panel-transition": '
+            b'"flex-grow 250ms ease-in-out"\n'
+            b'blocking:!0,callSource:"RepoSagas.openRepo (changedInV13)"\n'
+        )
+        drift_res = verify_asar_compatibility(drifted_asar)
+        self.assertFalse(drift_res.compatible)
+        self.assertEqual(drift_res.detected_version, "13.0.0")
+        self.assertEqual(
+            drift_res.missing_patches,
+            ["render.bundle.js (cached tab-switch refresh)"],
+        )
+        self.assertIsNotNone(drift_res.remediation_hint)
+        assert drift_res.remediation_hint is not None
+        self.assertIn(SUPPORTED_GK_VERSIONS, drift_res.remediation_hint)
+        self.assertIn("gk_preload_shim.c", drift_res.remediation_hint)
+
+        _, wt_repo = setup_multi_worktree_gk_repo(
+            self.repo_helper, self.tmp_path
+        )
+        home_dir, _, _ = create_fake_gitkraken_home(self.tmp_path)
+        install_ok = execute_gk_install(
+            repo_path=wt_repo,
+            ui=self.ui,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+            asar_path=compatible_asar,
+        )
+        self.assertTrue(
+            any(
+                "3/3 in-memory patches matched" in d
+                for d in install_ok.details
+            )
+        )
+        verify_ok = execute_gk_verify(
+            repo_path=wt_repo,
+            ui=self.ui,
+            expect=GkExpectMode.INSTALLED,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+            asar_path=compatible_asar,
+        )
+        self.assertTrue(verify_ok.passed)
+        self.assertTrue(verify_ok.checks["asar_patches_compatible"])
+
+        install_res = execute_gk_install(
+            repo_path=wt_repo,
+            ui=self.ui,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+            asar_path=drifted_asar,
+        )
+        self.assertTrue(
+            any(
+                "WARNING:" in d and "v13.0.0" in d for d in install_res.details
+            )
+        )
+
+        verify_res = execute_gk_verify(
+            repo_path=wt_repo,
+            ui=self.ui,
+            expect=GkExpectMode.INSTALLED,
+            home_dir=home_dir,
+            gk_root=home_dir / ".gitkraken",
+            asar_path=drifted_asar,
+        )
+        self.assertFalse(verify_res.passed)
+        self.assertIn("asar_patches_compatible", verify_res.failures)
 
 
 if __name__ == "__main__":

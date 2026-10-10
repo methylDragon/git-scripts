@@ -2,7 +2,7 @@
 
 ## Overview
 
-GitKraken Desktop on Linux degrades on large repositories and linked Git worktrees (`git worktree add`): its file watcher follows symlinks into build caches, thousands of automated CI tags slow down background fetches and tab switches, commit detail panels stutter on open, and terminal Git commands inside linked worktrees do not refresh the commit graph.
+GitKraken Desktop on Linux degrades on large repositories and linked Git worktrees (`git worktree add`): its file watcher follows symlinks into build caches, thousands of automated CI tags slow down background fetches and tab switches, switching back to a recently opened tab blocks on `"Opening repo"` while waiting for a full 9-step refresh, commit detail panels stutter on open, and terminal Git commands inside linked worktrees do not refresh the commit graph.
 
 `git gk` (legacy alias: `git-gk-optimize`) fixes these bottlenecks out-of-tree (`~/.config/gitkraken-optimizer/`) without modifying `/usr/share/gitkraken/` on disk, so optimizations survive system package updates and can be cleanly reverted at any time.
 
@@ -10,7 +10,7 @@ GitKraken Desktop on Linux degrades on large repositories and linked Git worktre
 
 ### Install and Uninstall (`git gk`)
 
-- [`shim_builder.py`](shim_builder.py) and [`gitkraken_launcher.py`](gitkraken_launcher.py): Builds `libgk_preload_shim.so` with CMake and writes `gitkraken-launcher`, `gitkraken-git`, `watched_repos.json`, and `~/.local/share/applications/gitkraken.desktop`.
+- [`shim_builder.py`](shim_builder.py) and [`gitkraken_launcher.py`](gitkraken_launcher.py): Builds `libgk_preload_shim.so` with CMake, verifies that the installed `/usr/share/gitkraken/resources/app.asar` matches the expected in-memory patch targets (printing version and remediation hints if a GitKraken update shifts them), and writes `gitkraken-launcher`, `gitkraken-git`, `watched_repos.json`, and `~/.local/share/applications/gitkraken.desktop`.
 - [`config_loader.py`](config_loader.py) and [`models.py`](models.py): Loads [`config.yaml`](config.yaml) and symlinks it into `~/.config/gitkraken-optimizer/` and `<common-git-dir>/gk-optimizer/`.
 - [`tag_pruner.py`](tag_pruner.py): Backs up pre-existing tag SHAs (`pre_install_refs.json`) and trims CI tag namespaces to the configured retention window.
 - [`state_manager.py`](state_manager.py): Configures negative fetch refspecs in `.git/config`, updates GitKraken profile settings, and restores original state on `uninstall`.
@@ -19,8 +19,8 @@ GitKraken Desktop on Linux degrades on large repositories and linked Git worktre
 
 `gitkraken.desktop` launches `/usr/share/gitkraken/gitkraken` through `~/.config/gitkraken-optimizer/gitkraken-launcher`, which exports `LD_PRELOAD=libgk_preload_shim.so` and starts `watch-daemon`:
 
-- [`csrc/gk_preload_shim.c`](csrc/gk_preload_shim.c) (`libgk_preload_shim.so`): `LD_PRELOAD` library that prunes `nsfw.node` directory traversal, patches `app.asar` UI transition rules in memory, and automatically strips itself from `LD_PRELOAD` in child shells and subprocesses.
-- [`git_wrapper.py`](git_wrapper.py) (`gitkraken-git`): `selectedGitPath` wrapper that strips `LD_PRELOAD` for child Git commands and filters `ls-remote --tags` and `fetch`.
+- [`csrc/gk_preload_shim.c`](csrc/gk_preload_shim.c) (`libgk_preload_shim.so`): `LD_PRELOAD` library that prunes `nsfw.node` directory traversal, patches `app.asar` UI transition rules and cached tab-switch refresh behavior in memory, and automatically strips itself from `LD_PRELOAD` in child shells and subprocesses.
+- [`git_wrapper.py`](git_wrapper.py) (`gitkraken-git`): Standalone stdlib `selectedGitPath` wrapper that strips `LD_PRELOAD` for child Git commands and filters `ls-remote --tags` and `fetch` without external package imports.
 - [`worktree_watcher.py`](worktree_watcher.py) (`watch-daemon`): Session daemon bound to GitKraken's PID that refreshes linked worktrees on ref changes and re-trims CI tags after fetches.
 
 ## Usage
@@ -50,6 +50,12 @@ GitKraken's file watcher (`nsfw.node`) recursively walks the working tree with `
 - **Symlinked repository and submodule roots are still followed**: If a symlink itself contains `.git` (for example, opening a repository via a symlinked directory path), the shim resolves it as a directory so GitKraken watches the repository normally.
 - **Git-tracked symlinks are still watched for changes without crawling targets**: Git stores working-tree symlinks as mode `120000` pointer entries (`lstat`) rather than indexing files inside the target directory. Returning `S_ISLNK` stops `nsfw.node` from recursing into external symlink targets (such as `bazel-*` output caches), while the parent directory's `inotify` watch still detects whenever a symlink itself is created, deleted, or retargeted.
 - **Configured directories are still skipped**: Real directories matching `watcher.ignored_dirs` in [`config.yaml`](config.yaml) are masked from `nsfw.node` directory recursion, while normal filesystem calls from `libgit2`, `git`, and the rest of GitKraken remain untouched.
+
+### Slow `"Opening repo"` Overlay When Switching Back to Cached Tabs
+
+GitKraken caches the Redux store of up to 10 recently opened repositories (`sessionRepoReduxStoreCache`) and restores that snapshot immediately on tab switch (`CachedRepoReduxStoreLoaded`). However, the cached branch of `openRepoSaga` still calls `refreshRepo` with `blocking: true` while `_updateTabsSaga` holds `tabIdDisplayingLoadyspin` active, locking the `"Opening repo"` overlay on screen for 1.5 to 4 seconds until all 9 refresh steps finish.
+
+When Electron reads `app.asar` into memory, `libgk_preload_shim.so` rewrites `blocking:!0,callSource:"RepoSagas.openRepo (usingReduxCache)"` to `blocking:!1,callSource:"RepoSagas.openRepo (usingReduxCache)"` in RAM, and `gitkraken-git` uses only the Python standard library (avoiding `PyYAML` import overhead on every Git command). Switching to a previously loaded tab immediately renders the cached commit graph and dismisses `"Opening repo"` while the 9-step refresh completes in the background. During `git gk install` and `git gk verify`, `verify_asar_compatibility` checks `app.asar` to confirm all in-memory patch targets match the installed GitKraken version (`12.4.x`, tested on `v12.4.0`) and prints remediation hints if an update changes any target string.
 
 ### Commit Detail Panel Animation Lag
 
