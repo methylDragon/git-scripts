@@ -1,5 +1,6 @@
 """Tests for the TopologyAnalyzer."""
 
+import subprocess
 from unittest.mock import MagicMock, patch
 
 from absl.testing import absltest
@@ -101,6 +102,37 @@ class TestTopologyAnalyzer(absltest.TestCase):
         analysis = analyzer.get_analysis("feat")
         self.assertTrue(analysis.is_obsolete)
         self.assertIsNone(analysis.cut_point)
+
+    def test_analyze_obsolescence_keeps_ancestor_branch_without_rev_list(
+        self,
+    ):
+        """Keeps ancestor branches non-obsolete for fast-forward rebase."""
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit("base", "base.txt", "base")
+        self.repo_helper.checkout("ancestor-branch", create=True)
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit("main-advance", "main.txt", "advance")
+
+        real_run = subprocess.run
+        rev_list_calls: list[list[str]] = []
+
+        def spy_run(cmd, *args, **kwargs):
+            if (
+                isinstance(cmd, list)
+                and len(cmd) >= 2
+                and cmd[:2] == ["git", "rev-list"]
+            ):
+                rev_list_calls.append(cmd)
+            return real_run(cmd, *args, **kwargs)
+
+        analyzer = TopologyAnalyzer(self.repo_helper.path, ["ancestor-branch"])
+        with patch("subprocess.run", side_effect=spy_run):
+            analyzer.analyze_obsolescence("main")
+
+        analysis = analyzer.get_analysis("ancestor-branch")
+        self.assertFalse(analysis.is_obsolete)
+        self.assertIsNone(analysis.cut_point)
+        self.assertEqual(rev_list_calls, [])
 
     def test_find_linear_stack_collects_all_ancestors_up_to_root(self):
         """Tests finding a linear stack."""

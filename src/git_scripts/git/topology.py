@@ -1,6 +1,5 @@
 """Git branch topology analyzer and graph state manager."""
 
-import subprocess
 from collections.abc import Callable, Sequence
 
 import pygit2
@@ -14,6 +13,17 @@ from git_scripts.git.reads import (
     is_obsolete,
 )
 from git_scripts.models import RemotePushParityResult, TopologyAnalysisResult
+
+
+def _has_unique_commits(
+    repo: pygit2.Repository, commit_id: pygit2.Oid, target: str
+) -> bool:
+    """Returns True if commit_id has commits not reachable from target."""
+    try:
+        target_oid = repo.revparse_single(target).peel(pygit2.Commit).id
+        return repo.merge_base(target_oid, commit_id) != commit_id
+    except (KeyError, ValueError, TypeError, pygit2.GitError):
+        return True
 
 
 class TopologyAnalyzer:
@@ -81,27 +91,15 @@ class TopologyAnalyzer:
             # If the branch has no unique commits (it is an ancestor of
             # target), we shouldn't skip it as obsolete; we want
             # rebase_standard to fast-forward it to the target branch.
-            try:
-                has_unique_commits = bool(
-                    subprocess.run(
-                        ["git", "rev-list", f"{target}..{commit_id}"],
-                        cwd=self.repo_path,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    ).stdout.strip()
-                )
-            except subprocess.CalledProcessError:
-                has_unique_commits = True
+            if not _has_unique_commits(local_repo, commit_id, target):
+                return False, None
 
-            if not has_unique_commits:
-                obs = False
-                cut = None
-            else:
-                obs = is_obsolete(local_repo, commit_id, target)
-                cut = None
-                if not obs:
-                    cut = find_cut_point(local_repo, str(commit_id), target)
+            obs = is_obsolete(local_repo, commit_id, target)
+            cut = (
+                None
+                if obs
+                else find_cut_point(local_repo, str(commit_id), target)
+            )
             return obs, cut
 
         if progress_callback:

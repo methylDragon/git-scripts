@@ -1,11 +1,49 @@
 """Parallel execution utilities for Git branch analysis."""
 
-import subprocess
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypeVar
 
+import pygit2
+
 T = TypeVar("T")
+
+
+def _count_branch_commits(
+    repo: pygit2.Repository | None,
+    target_oid: pygit2.Oid | None,
+    branch: str,
+) -> int:
+    """Returns the commit count in target_oid..branch (minimum weight 1)."""
+    if repo is None or target_oid is None:
+        return 1
+    try:
+        branch_oid = repo.revparse_single(branch).peel(pygit2.Commit).id
+        if (
+            branch_oid == target_oid
+            or repo.merge_base(target_oid, branch_oid) == branch_oid
+        ):
+            return 1
+        walker = repo.walk(branch_oid, pygit2.enums.SortMode.TOPOLOGICAL)
+        walker.hide(target_oid)
+        return max(1, sum(1 for _ in walker))
+    except (KeyError, ValueError, TypeError, pygit2.GitError):
+        return 1
+
+
+def _compute_branch_weights(
+    repo_path: str, branches: list[str], target_ref: str
+) -> dict[str, int]:
+    """Computes commit weights per branch relative to target_ref."""
+    repo: pygit2.Repository | None = None
+    target_oid: pygit2.Oid | None = None
+    try:
+        repo = pygit2.Repository(repo_path)
+        target_oid = repo.revparse_single(target_ref).peel(pygit2.Commit).id
+    except (KeyError, ValueError, TypeError, pygit2.GitError):
+        pass
+
+    return {b: _count_branch_commits(repo, target_oid, b) for b in branches}
 
 
 def analyze_branches_in_parallel(
@@ -37,40 +75,16 @@ def analyze_branches_in_parallel(
     if not branch_list:
         return {}
 
-    # Strip trailing /.git if present
-    repo_cwd = repo_path
-    if repo_cwd.endswith("/.git/") or repo_cwd.endswith("/.git"):
-        repo_cwd = repo_cwd[:-5]
-
-    counts = {}
-    total_commits = 0
-
-    with ThreadPoolExecutor() as count_executor:
-        count_futures = {}
-        for b in branch_list:
-            count_futures[
-                count_executor.submit(
-                    subprocess.run,
-                    ["git", "rev-list", "--count", f"{target_ref}..{b}"],
-                    cwd=repo_cwd,
-                    capture_output=True,
-                    text=True,
-                )
-            ] = b
-
-        for f in as_completed(count_futures):
-            b = count_futures[f]
-            try:
-                # Assign a minimum weight of 1 for completely merged branches
-                counts[b] = max(1, int(f.result().stdout.strip()))
-            except Exception:
-                counts[b] = 1
-            total_commits += counts[b]
-
-    results: dict[str, T] = {}
+    counts: dict[str, int] = (
+        _compute_branch_weights(repo_path, branch_list, target_ref)
+        if (on_start or on_progress)
+        else {}
+    )
 
     if on_start:
-        on_start(total_commits)
+        on_start(sum(counts.values()))
+
+    results: dict[str, T] = {}
 
     with ThreadPoolExecutor() as analyze_executor:
         analyze_futures = {

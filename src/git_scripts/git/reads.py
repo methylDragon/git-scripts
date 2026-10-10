@@ -20,14 +20,11 @@ def _check_squash_merge(
     """Returns True if commit_hash is squash-merged into target_ref."""
     if target_tree is None:
         try:
-            target_tree = subprocess.run(
-                ["git", "rev-parse", f"{target_ref}^{{tree}}"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-        except subprocess.CalledProcessError:
+            repo = pygit2.Repository(repo_path)
+            target_tree = str(
+                repo.revparse_single(target_ref).peel(pygit2.Commit).tree_id
+            )
+        except (KeyError, ValueError, pygit2.GitError):
             return False
 
     try:
@@ -44,11 +41,26 @@ def _check_squash_merge(
         return False
 
 
+def _has_matching_tree_in_range(
+    repo: pygit2.Repository,
+    commit_oid: pygit2.Oid,
+    target_oid: pygit2.Oid,
+    commit_tree_oid: pygit2.Oid,
+) -> bool:
+    """Returns True if any commit in commit_oid..target_oid matches tree."""
+    try:
+        walker = repo.walk(target_oid, pygit2.enums.SortMode.TOPOLOGICAL)
+        walker.hide(commit_oid)
+        return any(c.tree_id == commit_tree_oid for c in walker)
+    except (KeyError, ValueError, pygit2.GitError):
+        return False
+
+
 @lru_cache(maxsize=1024)
 def _is_obsolete_cached(
     repo_path: str, commit_hash: str, target_ref: str
 ) -> bool:
-    """Cached version of obsolete check using subprocesses."""
+    """Cached obsolescence check using git cherry/merge-tree and pygit2."""
     if repo_path.endswith("/.git/") or repo_path.endswith("/.git"):
         repo_path = repo_path[:-5]
 
@@ -67,38 +79,22 @@ def _is_obsolete_cached(
     except subprocess.CalledProcessError:
         pass
 
-    if _check_squash_merge(repo_path, commit_hash, target_ref):
+    try:
+        repo = pygit2.Repository(repo_path)
+        target_commit = repo.revparse_single(target_ref).peel(pygit2.Commit)
+        commit_obj = repo.revparse_single(commit_hash).peel(pygit2.Commit)
+    except (KeyError, ValueError, pygit2.GitError):
+        return False
+
+    if _check_squash_merge(
+        repo_path, commit_hash, target_ref, str(target_commit.tree_id)
+    ):
         return True
 
     # Strategy 3: Tree Hash Match in History
-    try:
-        commit_tree = subprocess.run(
-            ["git", "rev-parse", f"{commit_hash}^{{tree}}"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-        target_history_trees = subprocess.run(
-            [
-                "git",
-                "log",
-                "--pretty=%T",
-                f"{commit_hash}..{target_ref}",
-            ],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.splitlines()
-
-        if commit_tree in target_history_trees:
-            return True
-    except subprocess.CalledProcessError:
-        pass
-
-    return False
+    return _has_matching_tree_in_range(
+        repo, commit_obj.id, target_commit.id, commit_obj.tree_id
+    )
 
 
 def is_obsolete(
@@ -113,41 +109,57 @@ def is_obsolete(
     return _is_obsolete_cached(repo.path, str(commit_oid), target_ref)
 
 
+def _is_shadowed_by_descendant(
+    repo: pygit2.Repository,
+    branch: str,
+    branch_id: pygit2.Oid,
+    branch_oids: dict[str, pygit2.Oid],
+) -> bool:
+    """Returns True if branch is a strict ancestor or later co-located ref."""
+    for other_branch, other_id in branch_oids.items():
+        if branch == other_branch:
+            continue
+        if repo.merge_base(branch_id, other_id) != branch_id:
+            continue
+        if branch_id != other_id or branch > other_branch:
+            return True
+    return False
+
+
 def find_tips(repo: pygit2.Repository, branches: list[str]) -> list[str]:
     """Returns branches that are not ancestors of any other in the list."""
-    tips = []
-
-    # Iterate and assign true parent vs tip
-    for branch in branches:
-        is_tip = True
-        branch_commit = repo.revparse_single(branch)
-        for other_branch in branches:
-            if branch == other_branch:
-                continue
-            other_commit = repo.revparse_single(other_branch)
-
-            # Check if branch is strictly an ancestor of other_branch.
-            # If they point to the exact same commit, use a lexical tie-breaker
-            # to designate exactly one canonical tip.
-            is_ancestor = (
-                repo.merge_base(branch_commit.id, other_commit.id)
-                == branch_commit.id
-            )
-
-            if not is_ancestor:
-                continue
-
-            # If co-located, only the lexically earlier branch is kept as tip.
-            # Otherwise, branch is a strict ancestor of other_branch.
-            if branch_commit.id != other_commit.id or branch > other_branch:
-                is_tip = False
-                break
-
-        if is_tip:
-            tips.append(branch)
-
-    # Sort for deterministic output
+    branch_oids = {
+        branch: repo.revparse_single(branch).id for branch in branches
+    }
+    tips = [
+        branch
+        for branch, branch_id in branch_oids.items()
+        if not _is_shadowed_by_descendant(repo, branch, branch_id, branch_oids)
+    ]
     return sorted(set(tips))
+
+
+def _get_cherry_status_map(
+    repo_path: str, target_ref: str, tip_hash: str
+) -> dict[str, str] | None:
+    """Returns a commit-SHA-to-cherry-status ('+' or '-') map, or None."""
+    try:
+        cherry = subprocess.run(
+            ["git", "cherry", target_ref, tip_hash],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+
+    status_map: dict[str, str] = {}
+    for line in cherry.stdout.splitlines():
+        if line:
+            status, sha = line.split()
+            status_map[sha] = status
+    return status_map
 
 
 def find_cut_point(
@@ -161,60 +173,27 @@ def find_cut_point(
     in one highly-optimized batch call. Falls back to `merge-tree` only when
     squash merges are suspected.
     """
-    repo_path = repo.path
-    if repo_path.endswith("/.git/") or repo_path.endswith("/.git"):
-        repo_path = repo_path[:-5]
-
-    try:
-        cherry = subprocess.run(
-            ["git", "cherry", target_ref, tip_hash],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except subprocess.CalledProcessError:
+    repo_path = repo.path.removesuffix("/.git/").removesuffix("/.git")
+    status_map = _get_cherry_status_map(repo_path, target_ref, tip_hash)
+    if status_map is None:
         return None
 
-    # Map commit hashes to their patch-id equivalence status ('-' or '+')
-    status_map = {}
-    for line in cherry.stdout.splitlines():
-        if line:
-            status, sha = line.split()
-            status_map[sha] = status
-
-    tip_commit = repo.revparse_single(tip_hash)
-    target_commit = repo.revparse_single(target_ref)
+    try:
+        tip_commit = repo.revparse_single(tip_hash).peel(pygit2.Commit)
+        target_commit = repo.revparse_single(target_ref).peel(pygit2.Commit)
+        target_tree = str(target_commit.tree_id)
+    except (KeyError, ValueError, pygit2.GitError):
+        return None
 
     walker = repo.walk(tip_commit.id, pygit2.enums.SortMode.TOPOLOGICAL)
     walker.hide(target_commit.id)
 
-    target_tree = None
-
     for commit in walker:
         sha = str(commit.id)
-        status = status_map.get(sha, "")
-
-        if status == "-":
-            # Native patch-ID match found
+        if status_map.get(sha) == "-" or _check_squash_merge(
+            repo_path, sha, target_ref, target_tree
+        ):
             return sha
-        else:
-            # If it's '+' (or missing), it might still be a squash merge.
-            # We run `merge-tree` to verify.
-            if target_tree is None:
-                try:
-                    target_tree = subprocess.run(
-                        ["git", "rev-parse", f"{target_ref}^{{tree}}"],
-                        cwd=repo_path,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    ).stdout.strip()
-                except subprocess.CalledProcessError:
-                    return None
-
-            if _check_squash_merge(repo_path, sha, target_ref, target_tree):
-                return sha
 
     return None
 

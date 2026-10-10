@@ -1,6 +1,10 @@
+import subprocess
+from unittest.mock import patch
+
 from absl.testing import absltest
 
 from git_scripts.git.reads import (
+    _is_obsolete_cached,
     find_cut_point,
     find_sync_point,
     find_tips,
@@ -168,6 +172,43 @@ C
     └─ A
 """.strip()
         self.assertEqual(tree, expected)
+
+    def test_is_obsolete_matches_target_history_tree_without_rev_parse_or_log(
+        self,
+    ):
+        self.repo_helper.checkout("main")
+        self.repo_helper.checkout("feature/tree-match", create=True)
+        self.repo_helper.commit("c1", "f1.txt", "v1")
+        self.repo_helper.commit("c2", "f2.txt", "v2")
+        branch_oid = self.repo.revparse_single("feature/tree-match").id
+
+        # Create a commit on main that produces the exact same tree as c2
+        # followed by another commit on main so merge-tree at tip differs
+        self.repo_helper.checkout("main")
+        run_git(
+            ["merge", "--squash", "feature/tree-match"],
+            cwd=self.repo_helper.path,
+        )
+        run_git(
+            ["commit", "-m", "squashed exact tree"],
+            cwd=self.repo_helper.path,
+        )
+        self.repo_helper.commit("later on main", "f1.txt", "v1-modified")
+
+        _is_obsolete_cached.cache_clear()
+        real_run = subprocess.run
+        spawned_subcommands: list[str] = []
+
+        def spy_run(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and len(cmd) >= 2 and cmd[0] == "git":
+                spawned_subcommands.append(cmd[1])
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("subprocess.run", side_effect=spy_run):
+            self.assertTrue(is_obsolete(self.repo, branch_oid, "main"))
+
+        self.assertNotIn("rev-parse", spawned_subcommands)
+        self.assertNotIn("log", spawned_subcommands)
 
 
 if __name__ == "__main__":
