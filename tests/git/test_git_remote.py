@@ -50,6 +50,107 @@ class TestGitRemote(absltest.TestCase):
         ):
             update_target(".", "main")
 
+    @patch("git_scripts.git.remote.is_worktree_busy", return_value=False)
+    @patch(
+        "git_scripts.git.remote.get_other_worktree_path",
+        return_value="/wt/main",
+    )
+    @patch("git_scripts.git.remote.is_in_another_worktree", return_value=True)
+    @patch("git_scripts.git.remote.run_cmd")
+    def test_update_target_fast_forwards_target_in_other_worktree(
+        self,
+        mock_run_cmd,
+        mock_is_in_wt,
+        mock_get_wt_path,
+        mock_is_busy,
+    ):
+        del mock_is_in_wt, mock_get_wt_path, mock_is_busy
+        # show-ref, show-current, fetch, rev-parse @{u}, merge --ff-only
+        mock_run_cmd.side_effect = ["", "feat/a", "", "origin/main", ""]
+
+        result = update_target("/wt/feat", "main")
+
+        self.assertEqual(result, UpdateTargetResult.SUCCESS)
+        mock_run_cmd.assert_any_call(
+            ["git", "merge", "--ff-only", "@{u}"], cwd="/wt/main"
+        )
+
+    @patch("git_scripts.git.remote.is_worktree_busy", return_value=False)
+    @patch(
+        "git_scripts.git.remote.get_other_worktree_path",
+        return_value="/wt/main",
+    )
+    @patch("git_scripts.git.remote.is_in_another_worktree", return_value=True)
+    @patch("git_scripts.git.remote.run_cmd")
+    def test_update_target_falls_back_to_fetched_only_when_ff_fails(
+        self,
+        mock_run_cmd,
+        mock_is_in_wt,
+        mock_get_wt_path,
+        mock_is_busy,
+    ):
+        del mock_is_in_wt, mock_get_wt_path, mock_is_busy
+
+        def side_effect(cmd, cwd=None, check=True):
+            del cwd, check
+            if cmd[:2] == ["git", "merge"]:
+                raise GitExecutionError("diverged or dirty")
+            if cmd[:2] == ["git", "rev-parse"]:
+                return "origin/main"
+            if cmd[:2] == ["git", "branch"]:
+                return "feat/a"
+            return ""
+
+        mock_run_cmd.side_effect = side_effect
+
+        result = update_target("/wt/feat", "main")
+
+        self.assertEqual(result, UpdateTargetResult.FETCHED_ONLY)
+
+    @patch("git_scripts.git.remote.is_worktree_busy", return_value=True)
+    @patch(
+        "git_scripts.git.remote.get_other_worktree_path",
+        return_value="/wt/main",
+    )
+    @patch("git_scripts.git.remote.is_in_another_worktree", return_value=True)
+    @patch("git_scripts.git.remote.run_cmd")
+    def test_update_target_returns_fetched_only_when_other_worktree_is_busy(
+        self,
+        mock_run_cmd,
+        mock_is_in_wt,
+        mock_get_wt_path,
+        mock_is_busy,
+    ):
+        del mock_is_in_wt, mock_get_wt_path, mock_is_busy
+        mock_run_cmd.side_effect = ["", "feat/a", ""]
+
+        result = update_target("/wt/feat", "main")
+
+        self.assertEqual(result, UpdateTargetResult.FETCHED_ONLY)
+        self.assertEqual(mock_run_cmd.call_count, 3)
+
+    @patch("git_scripts.git.remote.is_worktree_busy", return_value=False)
+    @patch(
+        "git_scripts.git.remote.get_other_worktree_path",
+        return_value="/wt/main",
+    )
+    @patch("git_scripts.git.remote.is_in_another_worktree", return_value=True)
+    @patch("git_scripts.git.remote.run_cmd")
+    def test_update_target_returns_local_only_when_worktree_lacks_upstream(
+        self,
+        mock_run_cmd,
+        mock_is_in_wt,
+        mock_get_wt_path,
+        mock_is_busy,
+    ):
+        del mock_is_in_wt, mock_get_wt_path, mock_is_busy
+        mock_run_cmd.side_effect = ["", "feat/a", "", ""]
+
+        result = update_target("/wt/feat", "main")
+
+        self.assertEqual(result, UpdateTargetResult.LOCAL_ONLY)
+        self.assertEqual(mock_run_cmd.call_count, 4)
+
 
 if __name__ == "__main__":
     absltest.main()

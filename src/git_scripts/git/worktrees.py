@@ -91,18 +91,31 @@ def get_pending_recoveries(repo_path: str = ".") -> dict[str, str]:
     return pending
 
 
-def is_in_another_worktree(repo_path: str, branch_name: str) -> bool:
-    """Returns True if the branch is active in another git worktree."""
+def get_other_worktree_path(repo_path: str, branch_name: str) -> str | None:
+    """Returns the worktree path if branch_name is in another worktree."""
     try:
         current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
         if current == branch_name:
-            return False
+            return None
         worktrees = run_cmd(
             ["git", "worktree", "list", "--porcelain"], cwd=repo_path
         )
-        return f"branch refs/heads/{branch_name}" in worktrees.splitlines()
     except GitExecutionError:
-        return False
+        return None
+
+    current_wt = ""
+    target_line = f"branch refs/heads/{branch_name}"
+    for line in worktrees.splitlines():
+        if line.startswith("worktree "):
+            current_wt = line.removeprefix("worktree ")
+        elif line == target_line and current_wt:
+            return current_wt
+    return None
+
+
+def is_in_another_worktree(repo_path: str, branch_name: str) -> bool:
+    """Returns True if the branch is active in another git worktree."""
+    return get_other_worktree_path(repo_path, branch_name) is not None
 
 
 def is_worktree_busy(current_wt: str) -> bool:

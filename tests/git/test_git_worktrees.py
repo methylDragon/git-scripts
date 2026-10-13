@@ -7,7 +7,9 @@ from git_scripts.git.core import run_cmd
 from git_scripts.git.worktrees import (
     WorktreeLifecycleCallbacks,
     _get_state_file_path,
+    get_other_worktree_path,
     get_pending_recoveries,
+    is_in_another_worktree,
     manage_worktrees,
 )
 from tests.helpers import GitTestRepo
@@ -20,6 +22,23 @@ class TestGitWorktrees(absltest.TestCase):
 
     def tearDown(self):
         self.repo_helper.cleanup()
+
+    def test_get_other_worktree_path_and_is_in_another_worktree(self):
+        wt_a = os.path.join(self.repo_helper.temp_dir.name, "wt_a")
+        self.repo_helper.create_worktree(wt_a, "test-chain-a")
+
+        self.assertEqual(
+            get_other_worktree_path(self.repo_helper.path, "test-chain-a"),
+            wt_a,
+        )
+        self.assertTrue(
+            is_in_another_worktree(self.repo_helper.path, "test-chain-a")
+        )
+        self.assertIsNone(get_other_worktree_path(wt_a, "test-chain-a"))
+        self.assertFalse(is_in_another_worktree(wt_a, "test-chain-a"))
+        self.assertIsNone(
+            get_other_worktree_path(self.repo_helper.path, "nonexistent")
+        )
 
     def test_manage_worktrees_detaches_and_reattaches_branches(self):
         # Create a worktree for a branch

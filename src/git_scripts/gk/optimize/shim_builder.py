@@ -244,6 +244,25 @@ def _resolve_build_env(project_root: Path) -> dict[str, str]:
     return env
 
 
+def _resolve_cmake_build_dir(root: Path, dest_dir: Path) -> Path:
+    """Selects a writable CMake build directory isolated across workers."""
+    # Under pytest-xdist, parallel workers share the repo root and would
+    # overwrite each other's build.ninja and CMakeCache.txt in build/gk_shim.
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return dest_dir / "_cmake_build"
+
+    build_dir = root / "build" / "gk_shim"
+    try:
+        # Fall back to dest_dir when the repo root is mounted read-only.
+        build_dir.mkdir(parents=True, exist_ok=True)
+        probe = build_dir / f".write_probe_{os.getpid()}"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        return build_dir
+    except OSError:
+        return dest_dir / "_cmake_build"
+
+
 def build_shim(
     dest_dir: Path,
     project_root: Path | None = None,
@@ -251,14 +270,7 @@ def build_shim(
     """Builds and installs `libgk_preload_shim.so` via CMake (or `cc`)."""
     root = project_root if project_root is not None else get_project_root()
     src_dir = get_src_dir()
-    build_dir = root / "build" / "gk_shim"
-    try:
-        build_dir.mkdir(parents=True, exist_ok=True)
-        probe = build_dir / ".write_probe"
-        probe.write_text("", encoding="utf-8")
-        probe.unlink()
-    except OSError:
-        build_dir = dest_dir / "_cmake_build"
+    build_dir = _resolve_cmake_build_dir(root, dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     target_so = dest_dir / "libgk_preload_shim.so"
 

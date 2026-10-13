@@ -3,7 +3,11 @@
 import pygit2
 
 from git_scripts.git.core import GitExecutionError, run_cmd
-from git_scripts.git.worktrees import is_in_another_worktree
+from git_scripts.git.worktrees import (
+    get_other_worktree_path,
+    is_in_another_worktree,
+    is_worktree_busy,
+)
 from git_scripts.models import UpdateTargetResult
 
 
@@ -34,6 +38,45 @@ def get_default_remote(repo: pygit2.Repository, remotes: list[str]) -> str:
     return "origin" if not remotes or "origin" in remotes else remotes[0]
 
 
+def _get_upstream_ref(cwd: str) -> str:
+    """Returns the upstream tracking ref for HEAD in cwd, or empty string."""
+    return run_cmd(
+        [
+            "git",
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{u}",
+        ],
+        cwd=cwd,
+        check=False,
+    )
+
+
+def _update_target_in_other_worktree(
+    repo_path: str, target: str
+) -> UpdateTargetResult:
+    """Fetches and fast-forwards target inside the worktree holding it."""
+    run_cmd(
+        ["git", "fetch", "origin", target],
+        cwd=repo_path,
+        check=False,
+    )
+
+    wt_path = get_other_worktree_path(repo_path, target)
+    if not wt_path or is_worktree_busy(wt_path):
+        return UpdateTargetResult.FETCHED_ONLY
+
+    if not _get_upstream_ref(wt_path):
+        return UpdateTargetResult.LOCAL_ONLY
+
+    try:
+        run_cmd(["git", "merge", "--ff-only", "@{u}"], cwd=wt_path)
+        return UpdateTargetResult.SUCCESS
+    except GitExecutionError:
+        return UpdateTargetResult.FETCHED_ONLY
+
+
 def update_target(repo_path: str, target: str) -> UpdateTargetResult:
     """Fetches and rebases the target branch from its remote upstream.
 
@@ -57,35 +100,14 @@ def update_target(repo_path: str, target: str) -> UpdateTargetResult:
     current = run_cmd(["git", "branch", "--show-current"], cwd=repo_path)
     if current != target:
         if is_in_another_worktree(repo_path, target):
-            try:
-                run_cmd(
-                    ["git", "fetch", "origin", target],
-                    cwd=repo_path,
-                    check=False,
-                )
-            except GitExecutionError:
-                pass
-            return UpdateTargetResult.FETCHED_ONLY
+            return _update_target_in_other_worktree(repo_path, target)
 
         try:
             run_cmd(["git", "checkout", target], cwd=repo_path)
         except GitExecutionError as err:
             raise GitExecutionError(f"Could not checkout '{target}'.") from err
 
-    # Check upstream
-    upstream = run_cmd(
-        [
-            "git",
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{u}",
-        ],
-        cwd=repo_path,
-        check=False,
-    )
-
-    if upstream:
+    if _get_upstream_ref(repo_path):
         try:
             run_cmd(["git", "pull", "--rebase"], cwd=repo_path)
         except GitExecutionError as e:

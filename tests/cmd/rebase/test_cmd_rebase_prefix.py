@@ -319,6 +319,54 @@ class TestCmdRebasePrefix(absltest.TestCase):
             insrc_id,
         )
 
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
+    def test_execute_rebase_prefix_fast_forwards_target_in_other_worktree(
+        self, mock_push
+    ):
+        del mock_push
+        remote_dir = f"{self.repo_helper.temp_dir.name}/origin.git"
+        run_git(["init", "--bare", remote_dir], cwd=self.repo_helper.path)
+        self.repo_helper.add_remote("origin", remote_dir)
+
+        self.repo_helper.checkout("main")
+        run_git(["push", "-u", "origin", "main"], cwd=self.repo_helper.path)
+
+        self.repo_helper.checkout("ch3/feat", create=True)
+        self.repo_helper.commit("feat work", "feat.txt", "feat")
+
+        wt_feat = f"{self.repo_helper.temp_dir.name}/wt_feat"
+        self.repo_helper.checkout("main")
+        self.repo_helper.create_worktree(wt_feat, "ch3/feat")
+
+        # Advance origin/main via a separate clone while primary stays on main
+        clone_dir = f"{self.repo_helper.temp_dir.name}/upstream_clone"
+        run_git(["clone", remote_dir, clone_dir], cwd=self.repo_helper.path)
+        run_git(["config", "user.email", "t@example.com"], cwd=clone_dir)
+        run_git(["config", "user.name", "Tester"], cwd=clone_dir)
+        with open(f"{clone_dir}/upstream.txt", "w", encoding="utf-8") as f:
+            f.write("new-upstream\n")
+        run_git(["add", "upstream.txt"], cwd=clone_dir)
+        run_git(["commit", "-m", "upstream advance"], cwd=clone_dir)
+        run_git(["push", "origin", "main"], cwd=clone_dir)
+        new_origin_main = run_git(
+            ["rev-parse", "HEAD"], cwd=clone_dir
+        ).stdout.strip()
+
+        # Run rebase-prefix from wt_feat while primary worktree is on main
+        ui = UI(plain=True, auto_yes=True)
+        success = execute_rebase_prefix(
+            repo_path=wt_feat,
+            prefix="ch3/",
+            target="main",
+            all_worktrees=False,
+            auto_delete=False,
+            ui=ui,
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(self.repo_helper.rev_parse("main"), new_origin_main)
+        self._assert_parent("main", "ch3/feat")
+
     def _assert_parent(self, parent_branch: str, child_branch: str):
         # child_branch~1 should equal parent_branch
         parent_hash = self.repo_helper.rev_parse(parent_branch)
