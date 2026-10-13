@@ -2,12 +2,19 @@
 
 # pylint: disable=missing-function-docstring
 
+import re
 from unittest import mock
 
 from absl.testing import absltest, parameterized
 from typer.testing import CliRunner
 
 from git_scripts.cli import app, main
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 class TestCli(parameterized.TestCase):
@@ -289,11 +296,17 @@ class TestCli(parameterized.TestCase):
 
     def test_prefix_short_help_flag_renders_git_usage_and_examples(self):
         runner = CliRunner()
-        result = runner.invoke(app, ["prefix", "-h"], prog_name="git")
+        result = runner.invoke(
+            app,
+            ["prefix", "-h"],
+            prog_name="git",
+            env={"FORCE_COLOR": "1", "TERM": "xterm-256color"},
+        )
+        output = _strip_ansi(result.output)
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Usage: git prefix", result.output)
-        self.assertIn("git prefix rebase <prefix> [target]", result.output)
-        self.assertIn("Examples:", result.output)
+        self.assertIn("Usage: git prefix", output)
+        self.assertIn("git prefix rebase <prefix> [target]", output)
+        self.assertIn("Examples:", output)
 
     @parameterized.named_parameters(
         ("prefix_rebase", ["prefix", "rebase"], "Usage: git prefix rebase"),
@@ -309,10 +322,16 @@ class TestCli(parameterized.TestCase):
         self, args, expected_usage
     ):
         runner = CliRunner()
-        result = runner.invoke(app, args, prog_name="git")
+        result = runner.invoke(
+            app,
+            args,
+            prog_name="git",
+            env={"FORCE_COLOR": "1", "TERM": "xterm-256color"},
+        )
+        output = _strip_ansi(result.output)
         self.assertIn(result.exit_code, (0, 2))
-        self.assertIn(expected_usage, result.output)
-        self.assertIn("Examples:", result.output)
+        self.assertIn(expected_usage, output)
+        self.assertIn("Examples:", output)
 
 
 if __name__ == "__main__":

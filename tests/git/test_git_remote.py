@@ -132,6 +132,29 @@ class TestGitRemote(absltest.TestCase):
     @patch("git_scripts.git.remote.is_worktree_busy", return_value=False)
     @patch(
         "git_scripts.git.remote.get_other_worktree_path",
+        return_value=None,
+    )
+    @patch("git_scripts.git.remote.is_in_another_worktree", return_value=True)
+    @patch("git_scripts.git.remote.run_cmd")
+    def test_update_target_returns_fetched_only_when_worktree_path_missing(
+        self,
+        mock_run_cmd,
+        mock_is_in_wt,
+        mock_get_wt_path,
+        mock_is_busy,
+    ):
+        del mock_is_in_wt, mock_get_wt_path
+        mock_run_cmd.side_effect = ["", "feat/a", ""]
+
+        result = update_target("/wt/feat", "main")
+
+        self.assertEqual(result, UpdateTargetResult.FETCHED_ONLY)
+        self.assertEqual(mock_run_cmd.call_count, 3)
+        mock_is_busy.assert_not_called()
+
+    @patch("git_scripts.git.remote.is_worktree_busy", return_value=False)
+    @patch(
+        "git_scripts.git.remote.get_other_worktree_path",
         return_value="/wt/main",
     )
     @patch("git_scripts.git.remote.is_in_another_worktree", return_value=True)

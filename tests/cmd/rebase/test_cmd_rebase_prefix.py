@@ -325,7 +325,18 @@ class TestCmdRebasePrefix(absltest.TestCase):
     ):
         del mock_push
         remote_dir = f"{self.repo_helper.temp_dir.name}/origin.git"
-        run_git(["init", "--bare", remote_dir], cwd=self.repo_helper.path)
+        run_git(
+            [
+                "-c",
+                "init.defaultBranch=master",
+                "init",
+                "--bare",
+                "-b",
+                "main",
+                remote_dir,
+            ],
+            cwd=self.repo_helper.path,
+        )
         self.repo_helper.add_remote("origin", remote_dir)
 
         self.repo_helper.checkout("main")
