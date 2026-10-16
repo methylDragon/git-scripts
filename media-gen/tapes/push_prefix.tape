@@ -25,7 +25,7 @@ Hide
   Type 'tmux set -t git_push_prefix_demo status-left ""' Enter
   Type 'tmux set -t git_push_prefix_demo window-status-current-format ""' Enter
   Type 'tmux set -t git_push_prefix_demo window-status-format ""' Enter
-  Type 'tmux set -t git_push_prefix_demo status-right "demo: git push-prefix "' Enter
+  Type 'tmux set -t git_push_prefix_demo status-right "demo: git batch push -p "' Enter
   Type "tmux set -t git_push_prefix_demo pane-border-style 'fg=colour239'" Enter
   Type "tmux set -t git_push_prefix_demo pane-active-border-style 'fg=#ffcc66'" Enter
   Type "tmux split-window -t git_push_prefix_demo -v -p 85" Enter
@@ -56,7 +56,7 @@ Hide
   Sleep 500ms
   Type 'export PS1=""' Enter
   
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git push-prefix' --subtext 'Pushes all local branches matching a prefix to the remote repository.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
+  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git batch push -p' --subtext 'Pushes all local branches matching a prefix to the remote repository.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
 
   # Setup Bottom Right Pane (Commands)
   Ctrl+B
@@ -85,7 +85,7 @@ Sleep 6s
 # Run the command
 Ctrl+L
 Type "Pushing them all up one by one would be tedious, and we might forget some." Enter
-Type "Let's use @git push-prefix demo/ --force-with-lease@ to push them all at once safely!" Enter
+Type "Let's use @git batch push -p demo/ --force-with-lease@ to push them all at once safely!" Enter
 Enter
 Type "We can also pass arbitrary git arguments to the push command!" Enter
 Sleep 2s
@@ -94,7 +94,7 @@ Sleep 2s
 Ctrl+B
 Sleep 500ms
 Down
-Type "git push-prefix demo/ --force-with-lease"
+Type "git batch push -p demo/ --force-with-lease"
 Sleep 4s
 Enter
 

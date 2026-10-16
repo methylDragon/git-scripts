@@ -9,11 +9,9 @@ from rich.progress import Progress
 
 from git_scripts.cmd.shared import (
     get_ui_worktree_callbacks,
+    prompt_and_push_updated_branches,
     restore_branch,
     select_branches_to_delete,
-)
-from git_scripts.cmd.shared import (
-    prompt_and_push_updated_branches as _prompt_and_push,
 )
 from git_scripts.git.core import GitExecutionError, run_cmd
 from git_scripts.git.reads import (
@@ -579,18 +577,6 @@ def prompt_and_delete_merged(
         _print_deleted_branches_panel(deleted, ui)
 
 
-def prompt_and_push_updated_branches(
-    branches_to_keep: set[str] | list[str], repo_path: str, ui: UI
-) -> None:
-    """Displays updated branches and prompts to push with force-with-lease."""
-    _prompt_and_push(
-        branches_to_keep,
-        repo_path,
-        ui,
-        push_fn=push_branches,
-    )
-
-
 def _restore_start_branch_or_target(
     repo_path: str, start_branch: str, target: str
 ) -> None:
@@ -606,6 +592,33 @@ def _restore_start_branch_or_target(
     _checkout_target_or_detach(repo_path, target, set())
 
 
+def _build_dry_run_rebase_result(
+    analyzer: TopologyAnalyzer,
+    repo_path: str,
+    prefix: str,
+    target: str,
+) -> SingleBranchResult:
+    """Builds a preview SingleBranchResult without mutating Git state."""
+    result = SingleBranchResult()
+    repo = pygit2.Repository(repo_path)
+    branch_pool = set(analyzer.branches)
+    for branch in analyzer.tips:
+        plan = create_rebase_plan(analyzer, branch)
+        tree_str = format_stack_tree(
+            repo,
+            branch,
+            prefix,
+            target,
+            plan.action != RebaseAction.SKIP,
+            branch_pool,
+        )
+        if plan.action == RebaseAction.SKIP:
+            result.skipped_log.append(tree_str)
+        else:
+            result.success_log.append(tree_str)
+    return result
+
+
 def execute_batch_rebase(
     repo_path: str,
     branches: list[str],
@@ -616,6 +629,7 @@ def execute_batch_rebase(
     start_branch: str = "",
     all_worktrees: bool = False,
     auto_delete: bool = False,
+    dry_run: bool = False,
 ) -> bool:
     """Runs topology analysis, batch rebase, pruning, and push prompts."""
     analyzer = TopologyAnalyzer(repo_path, branches)
@@ -628,6 +642,14 @@ def execute_batch_rebase(
     )
     elapsed = time.monotonic() - start_time
     ui.print(f"  [dim]⏱️  Topology analysis completed in {elapsed:.2f}s[/dim]")
+
+    if dry_run:
+        preview_result = _build_dry_run_rebase_result(
+            analyzer, repo_path, prefix, target
+        )
+        print_batch_summary(ui, preview_result)
+        ui.print("\n📦  [Dry Run] No branches were rebased or deleted.")
+        return True
 
     if all_worktrees:
         ui.print(
@@ -653,6 +675,9 @@ def execute_batch_rebase(
     _restore_start_branch_or_target(repo_path, start_branch, target)
 
     prompt_and_push_updated_branches(
-        batch_result.branches_to_keep, repo_path, ui
+        batch_result.branches_to_keep,
+        repo_path,
+        ui,
+        push_fn=push_branches,
     )
     return len(batch_result.failed_log) == 0

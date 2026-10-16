@@ -25,7 +25,7 @@ Hide
   Type 'tmux set -t git_push_stack_demo status-left ""' Enter
   Type 'tmux set -t git_push_stack_demo window-status-current-format ""' Enter
   Type 'tmux set -t git_push_stack_demo window-status-format ""' Enter
-  Type 'tmux set -t git_push_stack_demo status-right "demo: git push-stack "' Enter
+  Type 'tmux set -t git_push_stack_demo status-right "demo: git batch push "' Enter
   Type "tmux set -t git_push_stack_demo pane-border-style 'fg=colour239'" Enter
   Type "tmux set -t git_push_stack_demo pane-active-border-style 'fg=#ffcc66'" Enter
   Type "tmux split-window -t git_push_stack_demo -v -p 85" Enter
@@ -56,7 +56,7 @@ Hide
   Sleep 500ms
   Type 'export PS1=""' Enter
   
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git push-stack' --subtext 'Pushes all branches in the current stack to the remote.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
+  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git batch push' --subtext 'Pushes all branches in the current stack to the remote.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
 
   # Setup Bottom Right Pane (Commands)
   Ctrl+B
@@ -85,14 +85,14 @@ Sleep 6s
 # Run the command
 Ctrl+L
 Type "We want to push the entire stack, but standard @git push@ will only push the current branch." Enter
-Type "Let's use @git push-stack@ to push the entire lineage up to trunk in topological order!" Enter
+Type "Let's use @git batch push@ to push the entire lineage up to trunk in topological order!" Enter
 Sleep 2s
 
 # Switch to command pane
 Ctrl+B
 Sleep 500ms
 Down
-Type "git push-stack"
+Type "git batch push"
 Sleep 4s
 Enter
 

@@ -1,12 +1,12 @@
-"""Core logic for the git cleanup branches local (git-prune-local) command."""
+"""Core logic for pruning obsolete local branches."""
 
 import time
 
 import pygit2
-from rich.panel import Panel
 
 from git_scripts.cmd.shared import (
     BranchProgressTracker,
+    print_two_bucket_prune_summary,
     select_branches_to_delete,
 )
 from git_scripts.git.core import GitExecutionError, run_cmd
@@ -150,7 +150,7 @@ def _classify_untracked_branches(
     ui.print(
         "[dim]🔍  Scanning untracked local branches for obsolescence...[/dim]"
     )
-    start_time = time.time()
+    start_time = time.monotonic()
 
     with BranchProgressTracker(ui, "Analyzing obsolescence") as tracker:
         results = analyze_branches_in_parallel(
@@ -172,7 +172,7 @@ def _classify_untracked_branches(
         else:
             unmerged_untracked.append(branch_name)
 
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
     ui.print(
         f"  [dim]⏱️  Local obsolescence scan completed in {elapsed:.2f}s[/dim]"
     )
@@ -217,34 +217,13 @@ def _print_prune_local_summary(prune_result: LocalPruneResult, ui: UI) -> None:
     """Prints panels summarizing orphaned and unmerged local branches."""
     orphaned = prune_result.orphaned_branches
     unmerged = prune_result.unmerged_no_upstream_branches
-
-    if orphaned:
-        branch_list = "\n".join(f"  - [cyan]{b}[/cyan]" for b in orphaned)
-        ui.print(
-            Panel(
-                branch_list,
-                title=(
-                    f"[bold yellow]Found {len(orphaned)} "
-                    "orphaned local branches[/bold yellow]"
-                ),
-                border_style="yellow",
-                expand=False,
-            )
-        )
-
-    if unmerged:
-        branch_list = "\n".join(f"  - [red]{b}[/red]" for b in unmerged)
-        ui.print(
-            Panel(
-                branch_list,
-                title=(
-                    f"[bold red]Found {len(unmerged)} "
-                    "unmerged branches lacking upstream tracking[/bold red]"
-                ),
-                border_style="red",
-                expand=False,
-            )
-        )
+    print_two_bucket_prune_summary(
+        orphaned,
+        f"Found {len(orphaned)} orphaned local branches",
+        unmerged,
+        f"Found {len(unmerged)} unmerged branches lacking upstream tracking",
+        ui,
+    )
 
 
 def _prompt_and_delete_local_branches(
@@ -312,7 +291,7 @@ def execute_prune_local(
         return False
 
     if dry_run:
-        ui.print("Running git-prune-local in dry-run mode...")
+        ui.print("Running git batch prune local in dry-run mode...")
 
     ui.print("[dim]🔄  Fetching origin --prune...[/dim]")
     try:

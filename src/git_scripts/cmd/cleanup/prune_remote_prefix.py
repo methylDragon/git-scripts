@@ -5,10 +5,11 @@ from subprocess import CalledProcessError
 from subprocess import run as subprocess_run
 
 import pygit2
-from rich.panel import Panel
 
 from git_scripts.cmd.shared import (
     BranchProgressTracker,
+    print_available_prefixes_hint,
+    print_two_bucket_prune_summary,
     select_branches_to_delete,
 )
 from git_scripts.git.core import GitExecutionError, run_cmd
@@ -18,46 +19,52 @@ from git_scripts.models import RemotePruneResult
 from git_scripts.ui import UI
 
 
+def _collect_remote_prefix_candidates(
+    repo: pygit2.Repository,
+    prefix: str,
+    target: str,
+    *,
+    also_prune_no_local: bool,
+) -> tuple[list[str], set[str]]:
+    """Collects matching remote refs and orphaned remote refs."""
+    local_branches = set(repo.branches.local)
+    refs_to_check: list[str] = []
+    orphaned_remotes: set[str] = set()
+    remote_prefix = f"refs/remotes/origin/{prefix}"
+    skipped_refs = (
+        "refs/remotes/origin/HEAD",
+        f"refs/remotes/origin/{target}",
+    )
+
+    for ref in repo.references:
+        if not ref.startswith(remote_prefix) or ref in skipped_refs:
+            continue
+        short_name = ref[len("refs/remotes/origin/") :]
+        if also_prune_no_local and short_name not in local_branches:
+            orphaned_remotes.add(ref)
+        refs_to_check.append(ref)
+    return refs_to_check, orphaned_remotes
+
+
 def _find_obsolete_remote_branches(
     repo_path: str,
-    repo,
     prefix: str,
     target: str,
     also_prune_no_local: bool,
-    ui,
+    ui: UI,
 ) -> RemotePruneResult:
-    """Scans and analyzes remote branches to find obsolete ones.
-
-    Returns:
-        A RemotePruneResult containing obsolete and unmerged branches.
-    """
+    """Scans and analyzes remote branches to find obsolete ones."""
     ui.print(
         f"[dim]🔍  Scanning 'origin/{prefix}*' for obsolete branches...[/dim]"
     )
-
-    start_time = time.time()
-
-    local_branches = set(repo.branches.local)
-    refs_to_check = []
-    orphaned_remotes = []
-
-    for ref in repo.references:
-        if ref.startswith(f"refs/remotes/origin/{prefix}"):
-            if ref in (
-                "refs/remotes/origin/HEAD",
-                f"refs/remotes/origin/{target}",
-            ):
-                continue
-
-            short_name = ref[len("refs/remotes/origin/") :]
-            if also_prune_no_local and short_name not in local_branches:
-                orphaned_remotes.append(ref)
-
-            refs_to_check.append(ref)
+    start_time = time.monotonic()
+    repo = get_repo(repo_path)
+    refs_to_check, orphaned_remotes = _collect_remote_prefix_candidates(
+        repo, prefix, target, also_prune_no_local=also_prune_no_local
+    )
 
     def _check_obs(ref_name: str) -> bool:
-        # thread safety just in case
-        local_repo = pygit2.Repository(repo_path)
+        local_repo = get_repo(repo_path)
         commit_id = local_repo.revparse_single(ref_name).id
         return is_obsolete(
             local_repo,
@@ -75,9 +82,8 @@ def _find_obsolete_remote_branches(
             on_progress=tracker.on_progress,
         )
 
-    obsolete_branches = []
-    unmerged_no_local_branches = []
-
+    obsolete_branches: list[str] = []
+    unmerged_no_local_branches: list[str] = []
     for ref, obsolete in results.items():
         short_name = ref[len("refs/remotes/origin/") :]
         if obsolete:
@@ -85,7 +91,7 @@ def _find_obsolete_remote_branches(
         elif ref in orphaned_remotes:
             unmerged_no_local_branches.append(short_name)
 
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
     ui.print(
         f"  [dim]⏱️  Remote obsolescence scan completed in {elapsed:.2f}s[/dim]"
     )
@@ -95,24 +101,43 @@ def _find_obsolete_remote_branches(
     )
 
 
+def _print_prune_remote_summary(
+    obsolete_branches: list[str],
+    unmerged_no_local: list[str],
+    ui: UI,
+) -> None:
+    """Prints panels summarizing obsolete and unmerged remote branches."""
+    unmerged_count = len(unmerged_no_local)
+    print_two_bucket_prune_summary(
+        obsolete_branches,
+        f"Found {len(obsolete_branches)} obsolete remote branches",
+        unmerged_no_local,
+        f"Found {unmerged_count} unmerged branches lacking local counterparts",
+        ui,
+    )
+
+
 def execute_prune_remote_prefix(
     repo_path: str,
     prefix: str,
     target: str = "main",
     dry_run: bool = False,
     also_prune_no_local: bool = False,
-    ui=None,
+    ui: UI | None = None,
 ) -> bool:
     """Prunes obsolete remote branches that match a prefix."""
     if ui is None:
         ui = UI()
 
-    if not prefix:
-        ui.print("❌  Error: Missing <prefix>.")
+    if not prefix or not prefix.strip():
+        ui.print(
+            "❌  Error: Missing <prefix>. Pass --prefix (-p) <pfx> "
+            "(e.g. 'git batch prune remote -p feat/ --dry-run')."
+        )
         return False
 
     if dry_run:
-        ui.print("Running git-prune-remote-prefix in dry-run mode...")
+        ui.print("Running git batch prune remote in dry-run mode...")
 
     ui.print("[dim]🔄  Fetching origin...[/dim]")
     try:
@@ -129,7 +154,7 @@ def execute_prune_remote_prefix(
         return False
 
     prune_result = _find_obsolete_remote_branches(
-        repo_path, repo, prefix, target, also_prune_no_local, ui
+        repo_path, prefix, target, also_prune_no_local, ui
     )
 
     obsolete_branches = prune_result.obsolete_branches
@@ -137,39 +162,14 @@ def execute_prune_remote_prefix(
 
     if not obsolete_branches and not unmerged_no_local:
         ui.print("✅  No remote branches found for pruning.")
+        if not any(
+            ref.startswith(f"refs/remotes/origin/{prefix}")
+            for ref in repo.references
+        ):
+            print_available_prefixes_hint(repo, ui, remote=True)
         return True
 
-    if obsolete_branches:
-        branch_list = "\n".join(
-            f"  - [cyan]{b}[/cyan]" for b in obsolete_branches
-        )
-        ui.print(
-            Panel(
-                branch_list,
-                title=(
-                    f"[bold yellow]Found {len(obsolete_branches)} "
-                    "obsolete remote branches[/bold yellow]"
-                ),
-                border_style="yellow",
-                expand=False,
-            )
-        )
-
-    if unmerged_no_local:
-        branch_list = "\n".join(
-            f"  - [red]{b}[/red]" for b in unmerged_no_local
-        )
-        ui.print(
-            Panel(
-                branch_list,
-                title=(
-                    f"[bold red]Found {len(unmerged_no_local)} "
-                    "unmerged branches lacking local counterparts[/bold red]"
-                ),
-                border_style="red",
-                expand=False,
-            )
-        )
+    _print_prune_remote_summary(obsolete_branches, unmerged_no_local, ui)
 
     if dry_run:
         ui.print("\n📦  [Dry Run] No changes made.")

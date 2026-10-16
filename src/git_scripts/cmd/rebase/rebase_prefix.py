@@ -3,7 +3,11 @@
 import pygit2
 
 from git_scripts.cmd.rebase.rebase_orchestrator import execute_batch_rebase
-from git_scripts.cmd.shared import restore_branch, ui_update_target
+from git_scripts.cmd.shared import (
+    print_available_prefixes_hint,
+    restore_branch,
+    ui_update_target,
+)
 from git_scripts.ui import UI
 
 
@@ -26,6 +30,7 @@ def execute_rebase_prefix(
     target: str = "main",
     all_worktrees: bool = False,
     auto_delete: bool = False,
+    dry_run: bool = False,
     ui: UI | None = None,
 ) -> bool:
     """Executes the rebase-prefix command to batch rebase stack branches."""
@@ -45,7 +50,7 @@ def execute_rebase_prefix(
     except pygit2.GitError:
         pass
 
-    if not ui_update_target(repo_path, target, ui):
+    if not dry_run and not ui_update_target(repo_path, target, ui):
         restore_branch(repo_path, start_branch)
         return False
 
@@ -54,6 +59,7 @@ def execute_rebase_prefix(
 
     if not all_branches:
         ui.print("  [yellow]No matching branches found.[/yellow]")
+        print_available_prefixes_hint(repo, ui)
         restore_branch(repo_path, start_branch)
         return True
 
@@ -65,5 +71,6 @@ def execute_rebase_prefix(
         start_branch=start_branch,
         all_worktrees=all_worktrees,
         auto_delete=auto_delete,
+        dry_run=dry_run,
         ui=ui,
     )

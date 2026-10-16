@@ -48,11 +48,16 @@ pixi install
 echo "🔗 Symlinking binaries to $BIN_DIR and completions to $COMPLETION_DIR..."
 mkdir -p "$BIN_DIR" "$COMPLETION_DIR"
 COMPLETION_SRC="$INSTALL_DIR/$COMPLETION_SRC_REL"
+for stale_bin in "$BIN_DIR"/git-*; do
+  if [ -L "$stale_bin" ] && [ ! -e "$stale_bin" ]; then
+    stale_name=$(basename "$stale_bin")
+    rm -f "$stale_bin" "$COMPLETION_DIR/$stale_name"
+  fi
+done
 for script in bin/git-*; do
   script_name=$(basename "$script")
   chmod +x "$INSTALL_DIR/$script"
   ln -sf "$INSTALL_DIR/$script" "$BIN_DIR/$script_name"
-  rm -f "$HOME/.local/share/man/man1/$script_name.1"
   echo "   -> Created $script_name"
   if [ "$script_name" != "git-scripts-update" ] && [ -f "$COMPLETION_SRC" ]; then
     ln -sf "$COMPLETION_SRC" "$COMPLETION_DIR/$script_name"
@@ -70,10 +75,10 @@ fi
 # even in non-interactive shells while falling back to `man` for built-in Git commands.
 git config --global --replace-all man.viewer git-scripts
 git config --global --add man.viewer man
-git config --global man.git-scripts.cmd 'sh -c '\''case "$1" in git-stack|git-prefix|git-cleanup|git-gh|git-gk|git-gk-optimize|git-evolve|git-rebase-stack|git-rebase-prefix|git-push-stack|git-push-prefix|git-prune-local|git-prune-remote-prefix|git-gh-align-pr-bases-and-sync-stacks) exec "$1" -h ;; *) exit 1 ;; esac'\'' --'
+git config --global man.git-scripts.cmd 'sh -c '\''case "$1" in git-batch|git-evolve|git-gh|git-gk) exec "$1" -h ;; *) exec man "$@" ;; esac'\'' --'
 
 echo ""
 echo "✅ Installation complete!"
 echo "Make sure $BIN_DIR is in your PATH."
-echo "You can now run commands like 'git stack', 'git prefix', 'git cleanup', 'git gh', and 'git gk'."
+echo "You can now run commands like 'git batch', 'git evolve', 'git gh', and 'git gk'."
 echo "To update in the future, simply run: git-scripts-update"

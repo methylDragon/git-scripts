@@ -6,15 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "git-scripts"
 version = "0.1.0"
 dependencies = [
-    "pygit2",
-    "rich",
-    "questionary",
+    "filelock",
+    "inflect",
     "pydantic",
+    "pygit2",
     "pyyaml",
+    "questionary",
+    "rich",
+    "typer",
 ]
 
 [project.scripts]
-git-rebase-prefix = "git_scripts.cli:main"
-git-push-prefix = "git_scripts.cli:main"
-git-gk-optimize = "git_scripts.cli:main"
-
+git-batch = "git_scripts.cli:main"
+git-evolve = "git_scripts.cli:main"
+git-gh = "git_scripts.cli:main"
+git-gk = "git_scripts.cli:main"

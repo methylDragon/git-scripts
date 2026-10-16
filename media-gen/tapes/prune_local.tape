@@ -25,7 +25,7 @@ Hide
   Type 'tmux set -t git_prune_local_demo status-left ""' Enter
   Type 'tmux set -t git_prune_local_demo window-status-current-format ""' Enter
   Type 'tmux set -t git_prune_local_demo window-status-format ""' Enter
-  Type 'tmux set -t git_prune_local_demo status-right "demo: git prune-local "' Enter
+  Type 'tmux set -t git_prune_local_demo status-right "demo: git batch prune local "' Enter
   Type "tmux set -t git_prune_local_demo pane-border-style 'fg=colour239'" Enter
   Type "tmux set -t git_prune_local_demo pane-active-border-style 'fg=#ffcc66'" Enter
   Type "tmux split-window -t git_prune_local_demo -v -p 85" Enter
@@ -56,7 +56,7 @@ Hide
   Sleep 500ms
   Type 'export PS1=""' Enter
   
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git prune-local' --subtext 'Prunes local branches after an obsolescence check (fetch --prune).'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
+  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git batch prune local' --subtext 'Prunes local branches after an obsolescence check (fetch --prune).'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
 
   # Setup Bottom Right Pane (Commands)
   Ctrl+B
@@ -85,14 +85,14 @@ Sleep 6s
 # Run the command
 Ctrl+L
 Type "Git leaves our local tracking branches hanging around, making things messy." Enter
-Type "Let's use @git prune-local@ to perform an obsolescence check and safely clean up!" Enter
+Type "Let's use @git batch prune local@ to perform an obsolescence check and safely clean up!" Enter
 Sleep 2s
 
 # Switch to command pane
 Ctrl+B
 Sleep 500ms
 Down
-Type "git prune-local"
+Type "git batch prune local"
 Sleep 4s
 Enter
 

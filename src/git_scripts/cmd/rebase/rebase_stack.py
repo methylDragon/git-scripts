@@ -1,4 +1,4 @@
-"""Core logic for the git stack rebase (git-rebase-stack) command."""
+"""Core logic for rebasing the checked-out linear branch stack."""
 
 import pygit2
 
@@ -13,24 +13,12 @@ from git_scripts.cmd.shared import (
 from git_scripts.ui import UI
 
 
-def _get_linear_stack(
-    repo: pygit2.Repository,
-    current_branch: str,
-    target: str,
-    pool: set[str],
-    ui: UI,
-) -> set[str] | None:
-    """Finds the full linear stack containing current_branch within pool."""
-    return resolve_linear_stack(
-        repo, current_branch, target, pool, ui, action_verb="rebase"
-    )
-
-
 def execute_rebase_stack(
     repo_path: str = ".",
     target: str = "main",
     all_worktrees: bool = False,
     auto_delete: bool = False,
+    dry_run: bool = False,
     ui: UI | None = None,
 ) -> bool:
     """Executes the rebase-stack command to rebase the current linear stack."""
@@ -55,7 +43,9 @@ def execute_rebase_stack(
     ui.print(f"[dim]🔍  Analyzing stack for '{current_branch}'...[/dim]")
 
     pool = get_local_branch_pool(repo, target)
-    stack = _get_linear_stack(repo, current_branch, target, pool, ui)
+    stack = resolve_linear_stack(
+        repo, current_branch, target, pool, ui, action_verb="rebase"
+    )
     if stack is None:
         return False
 
@@ -67,7 +57,7 @@ def execute_rebase_stack(
         )
         return True
 
-    if not ui_update_target(repo_path, target, ui):
+    if not dry_run and not ui_update_target(repo_path, target, ui):
         restore_branch(repo_path, current_branch)
         return False
 
@@ -79,5 +69,6 @@ def execute_rebase_stack(
         start_branch=current_branch,
         all_worktrees=all_worktrees,
         auto_delete=auto_delete,
+        dry_run=dry_run,
         ui=ui,
     )

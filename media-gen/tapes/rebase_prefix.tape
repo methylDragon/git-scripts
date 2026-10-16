@@ -25,7 +25,7 @@ Hide
   Type 'tmux set -t git_rebase_prefix_demo status-left ""' Enter
   Type 'tmux set -t git_rebase_prefix_demo window-status-current-format ""' Enter
   Type 'tmux set -t git_rebase_prefix_demo window-status-format ""' Enter
-  Type 'tmux set -t git_rebase_prefix_demo status-right "demo: git rebase-prefix "' Enter
+  Type 'tmux set -t git_rebase_prefix_demo status-right "demo: git batch rebase -p "' Enter
   Type "tmux set -t git_rebase_prefix_demo pane-border-style 'fg=colour239'" Enter
   Type "tmux set -t git_rebase_prefix_demo pane-active-border-style 'fg=#ffcc66'" Enter
   Type "tmux split-window -t git_rebase_prefix_demo -v -p 85" Enter
@@ -56,7 +56,7 @@ Hide
   Sleep 500ms
   Type 'export PS1=""' Enter
   
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git rebase-prefix' --subtext 'Rebases all stacks matching prefix onto target. Preserves topology; skips commits already squashed upstream.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
+  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git batch rebase' --subtext 'Rebases all stacks matching prefix onto target. Preserves topology; skips commits already squashed upstream.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
 
   # Setup Bottom Right Pane (Commands)
   Ctrl+B
@@ -85,7 +85,7 @@ Sleep 6s
 # Run the command
 Ctrl+L
 Type "It would normally be very tedious to manually rebase each stack one by one," Enter
-Type "but we can use @git rebase-prefix@ to rebase all stacks matching the @demo/@ prefix at once!" Enter
+Type "but we can use @git batch rebase -p@ to rebase all stacks matching the @demo/@ prefix at once!" Enter
 Enter
 Type "*Not shown: rebase conflicts will gracefully pause, giving you the option to resolve them or safely abort the affected stack!" Enter
 Sleep 2s
@@ -94,7 +94,7 @@ Sleep 2s
 Ctrl+B
 Sleep 500ms
 Down
-Type "git rebase-prefix demo/"
+Type "git batch rebase -p demo/"
 Sleep 4s
 Enter
 

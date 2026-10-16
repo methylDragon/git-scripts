@@ -26,7 +26,7 @@ Hide
   Type 'tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo status-left ""' Enter
   Type 'tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo window-status-current-format ""' Enter
   Type 'tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo window-status-format ""' Enter
-  Type 'tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo status-right "demo: git gh-align-pr-bases-and-sync-stacks "' Enter
+  Type 'tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo status-right "demo: git gh align "' Enter
   Type "tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo pane-border-style 'fg=colour239'" Enter
   Type "tmux set -t git_gh_align_pr_bases_and_sync_stacks_demo pane-active-border-style 'fg=#ffcc66'" Enter
   Type "tmux split-window -t git_gh_align_pr_bases_and_sync_stacks_demo -v -p 85" Enter
@@ -57,7 +57,7 @@ Hide
   Sleep 500ms
   Type 'export PS1=""' Enter
   
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git gh-align-pr-bases-and-sync-stacks' --subtext 'Aligns PR bases and syncs local stacks.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
+  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git gh align' --subtext 'Aligns PR bases and syncs local stacks.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
 
   # Setup Bottom Right Pane (Commands)
   Ctrl+B
@@ -87,7 +87,7 @@ Sleep 6s
 # Run the command
 Ctrl+L
 Type "Manually aligning GitHub PRs to match local topology is tedious and error-prone." Enter
-Type "Let's use @git gh-align-pr-bases-and-sync-stacks@ to do it automatically via the GitHub API!" Enter
+Type "Let's use @git gh align@ to do it automatically via the GitHub API!" Enter
 Enter
 Type "It will also detect and let us create PRs for branches that don't have them." Enter
 Sleep 2s
@@ -96,7 +96,7 @@ Sleep 2s
 Ctrl+B
 Sleep 500ms
 Down
-Type "git gh-align-pr-bases-and-sync-stacks"
+Type "git gh align"
 Sleep 4s
 Enter
 

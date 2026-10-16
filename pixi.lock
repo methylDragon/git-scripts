@@ -1768,13 +1768,16 @@ packages:
 - pypi: ./
   name: git-scripts
   version: 0.1.0
-  sha256: 9f223ae6add6d927389db29906c3f13c30d4c76a08a027b5d6ca90c76a3da475
+  sha256: 14c42a975f4a6ac287b4248e5609eaca0a31840a9a2afd4116cba90e4d7346b4
   requires_dist:
-  - pygit2
-  - rich
-  - questionary
+  - filelock
+  - inflect
   - pydantic
+  - pygit2
   - pyyaml
+  - questionary
+  - rich
+  - typer
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/win-64/glib-2.88.3-h3750008_0.conda
   sha256: 83422a7831b2fd2c85cf98ad3e74e6a93dac008ac14dd73f9846ddcc8c3714db

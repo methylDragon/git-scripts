@@ -378,6 +378,29 @@ class TestCmdRebasePrefix(absltest.TestCase):
         self.assertEqual(self.repo_helper.rev_parse("main"), new_origin_main)
         self._assert_parent("main", "ch3/feat")
 
+    @mock.patch("git_scripts.cmd.rebase.rebase_orchestrator.push_branches")
+    def test_execute_rebase_prefix_dry_run_previews_without_mutating_refs(
+        self, mock_push
+    ):
+        self.repo_helper.checkout("main")
+        self.repo_helper.commit("main-update-dry-run")
+        old_a_hash = self.repo_helper.rev_parse("test-chain-a")
+
+        ui = UI(plain=True, auto_yes=False)
+        success = execute_rebase_prefix(
+            repo_path=self.repo_helper.path,
+            prefix="test-chain-",
+            target="main",
+            dry_run=True,
+            ui=ui,
+        )
+
+        self.assertTrue(success)
+        mock_push.assert_not_called()
+        self.assertEqual(
+            self.repo_helper.rev_parse("test-chain-a"), old_a_hash
+        )
+
     def _assert_parent(self, parent_branch: str, child_branch: str):
         # child_branch~1 should equal parent_branch
         parent_hash = self.repo_helper.rev_parse(parent_branch)

@@ -202,7 +202,7 @@ class TestCmdRebaseStack(absltest.TestCase):
     ):
         self.repo_helper.checkout("test-chain-a")
         with mock.patch(
-            "git_scripts.cmd.rebase.rebase_stack._get_linear_stack",
+            "git_scripts.cmd.rebase.rebase_stack.resolve_linear_stack",
             return_value=set(),
         ):
             ui = MockUI()

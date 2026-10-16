@@ -4,7 +4,7 @@
 
 GitKraken Desktop on Linux degrades on large repositories and linked Git worktrees (`git worktree add`): its file watcher follows symlinks into build caches, thousands of automated CI tags slow down background fetches and tab switches, switching back to a recently opened tab blocks on `"Opening repo"` while waiting for a full 9-step refresh, commit detail panels stutter on open, and terminal Git commands inside linked worktrees do not refresh the commit graph.
 
-`git gk` (legacy alias: `git-gk-optimize`) fixes these bottlenecks out-of-tree (`~/.config/gitkraken-optimizer/`) without modifying `/usr/share/gitkraken/` on disk, so optimizations survive system package updates and can be cleanly reverted at any time.
+`git gk` fixes these bottlenecks out-of-tree (`~/.config/gitkraken-optimizer/`) without modifying `/usr/share/gitkraken/` on disk, so optimizations survive system package updates and can be cleanly reverted at any time.
 
 ## Architecture
 

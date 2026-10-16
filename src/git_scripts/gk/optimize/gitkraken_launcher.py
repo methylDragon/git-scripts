@@ -95,16 +95,14 @@ def write_gitkraken_launcher(
     launcher_path = dest_dir / "gitkraken-launcher"
     shim_so = dest_dir / "libgk_preload_shim.so"
     ignored_colon = ":".join(ignored_dirs)
-    git_gk_optimize_bin = root / "bin" / "git-gk-optimize"
-    if git_gk_optimize_bin.is_file() and not os.access(
-        git_gk_optimize_bin, os.X_OK
-    ):
+    git_gk_bin = root / "bin" / "git-gk"
+    if git_gk_bin.is_file() and not os.access(git_gk_bin, os.X_OK):
         try:
-            git_gk_optimize_bin.chmod(0o755)
+            git_gk_bin.chmod(0o755)
         except OSError:
             pass
     daemon_cmd = (
-        f'"{git_gk_optimize_bin}" watch-daemon "{common_git_dir}"'
+        f'"{git_gk_bin}" watch-daemon "{common_git_dir}"'
         ' --gk-pid "$$" >/dev/null 2>&1 &'
     )
 
@@ -133,7 +131,7 @@ if profiles.is_dir():
         except Exception:
             pass
 PYEOF
-if [ -f "{git_gk_optimize_bin}" ]; then
+if [ -f "{git_gk_bin}" ]; then
     {daemon_cmd}
 fi
 export BAMF_DESKTOP_FILE_HINT="{desktop_path}"

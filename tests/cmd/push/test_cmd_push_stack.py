@@ -158,7 +158,7 @@ class TestCmdPushStack(absltest.TestCase):
         self.repo.create_branch("orphan", head_commit)
         self.repo_helper.checkout("orphan")
         with mock.patch(
-            "git_scripts.cmd.push.push_stack._get_linear_stack",
+            "git_scripts.cmd.push.push_stack.resolve_linear_stack",
             return_value=set(),
         ):
             ui = MockUI()

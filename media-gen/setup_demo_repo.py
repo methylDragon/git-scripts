@@ -188,13 +188,10 @@ def create_wrappers(repo_dir: Path):
     src_dir = (project_root / "src").resolve()
 
     commands = [
+        "batch",
         "evolve",
-        "gh-align-pr-bases-and-sync-stacks",
-        "prune-local",
-        "prune-remote-prefix",
-        "push-prefix",
-        "push-stack",
-        "rebase-prefix",
+        "gh",
+        "gk",
     ]
 
     for cmd in commands:

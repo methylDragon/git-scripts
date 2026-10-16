@@ -22,79 +22,12 @@ class TestCli(parameterized.TestCase):
 
     @parameterized.named_parameters(
         (
-            "legacy_rebase_prefix",
-            ["git-scripts", "rebase-prefix", "feat/"],
-            "prefix_commands.execute_rebase_prefix",
-            True,
-            0,
-            {"prefix": "feat/", "target": "main"},
-        ),
-        (
-            "legacy_push_prefix_strips_all_worktrees",
-            [
-                "git-scripts",
-                "push-prefix",
-                "feat/",
-                "--all-worktrees",
-                "--force-with-lease",
-            ],
-            "prefix_commands.execute_push_prefix",
-            True,
-            0,
-            {"prefix": "feat/", "push_opts": ["--force-with-lease"]},
-        ),
-        (
-            "legacy_evolve",
+            "evolve_root_command",
             ["git-scripts", "evolve", "abcdef"],
-            "stack_commands.execute_evolve",
+            "execute_evolve",
             True,
             0,
             {"old_hash": "abcdef"},
-        ),
-        (
-            "legacy_prune_local_defaults",
-            ["git-scripts", "prune-local"],
-            "cleanup_commands.execute_prune_local",
-            True,
-            0,
-            {"also_prune_no_upstream": False},
-        ),
-        (
-            "legacy_prune_local_no_upstream",
-            ["git-scripts", "prune-local", "--also-prune-no-upstream"],
-            "cleanup_commands.execute_prune_local",
-            True,
-            0,
-            {"also_prune_no_upstream": True},
-        ),
-        (
-            "legacy_prune_remote_prefix",
-            ["git-scripts", "prune-remote-prefix", "feat/"],
-            "cleanup_commands.execute_prune_remote_prefix",
-            True,
-            0,
-            {"prefix": "feat/"},
-        ),
-        (
-            "legacy_rebase_stack_target_opt_override",
-            ["git-scripts", "rebase-stack", "--target", "develop"],
-            "stack_commands.execute_rebase_stack",
-            True,
-            0,
-            {"target": "develop"},
-        ),
-        (
-            "legacy_gh_align",
-            [
-                "git-scripts",
-                "gh-align-pr-bases-and-sync-stacks",
-                "--remote",
-                "upstream",
-            ],
-            "gh_commands.execute_align_pr_bases_and_sync_stacks",
-            True,
-            0,
-            {"remote": "upstream", "create_missing": False},
         ),
         (
             "gh_align_subcommand_defaults",
@@ -110,8 +43,10 @@ class TestCli(parameterized.TestCase):
                 "git-scripts",
                 "gh",
                 "align",
+                "develop",
+                "--prefix",
                 "feat/",
-                "main",
+                "-c",
                 "--create-missing",
             ],
             "gh_commands.execute_align_pr_bases_and_sync_stacks",
@@ -119,96 +54,111 @@ class TestCli(parameterized.TestCase):
             0,
             {
                 "prefix": "feat/",
-                "target": "main",
+                "target": "develop",
+                "current_stack_only": True,
                 "create_missing": True,
             },
         ),
         (
-            "stack_rebase_subcommand",
-            ["git-scripts", "stack", "rebase", "develop"],
-            "stack_commands.execute_rebase_stack",
+            "batch_rebase_defaults_to_current_stack",
+            ["git-scripts", "batch", "rebase", "develop", "--dry-run"],
+            "batch_commands.execute_rebase_stack",
             True,
             0,
-            {"target": "develop"},
+            {"target": "develop", "dry_run": True},
         ),
         (
-            "stack_rebase_failure_exits_nonzero",
-            ["git-scripts", "stack", "rebase"],
-            "stack_commands.execute_rebase_stack",
+            "batch_rebase_failure_exits_nonzero",
+            ["git-scripts", "batch", "rebase", "--current"],
+            "batch_commands.execute_rebase_stack",
             False,
             1,
-            {"target": "main"},
+            {"target": "main", "dry_run": False},
         ),
         (
-            "stack_push_subcommand_extra_opts",
-            ["git-scripts", "stack", "push", "--target", "develop", "--force"],
-            "stack_commands.execute_push_stack",
+            "batch_rebase_prefix_option",
+            [
+                "git-scripts",
+                "batch",
+                "rebase",
+                "develop",
+                "--prefix",
+                "feat/",
+                "--all-worktrees",
+            ],
+            "batch_commands.execute_rebase_prefix",
+            True,
+            0,
+            {"prefix": "feat/", "target": "develop", "all_worktrees": True},
+        ),
+        (
+            "batch_push_defaults_to_current_stack",
+            ["git-scripts", "batch", "push", "--target", "develop", "--force"],
+            "batch_commands.execute_push_stack",
             True,
             0,
             {"target": "develop", "push_opts": ["--force"]},
         ),
         (
-            "stack_evolve_subcommand",
-            ["git-scripts", "stack", "evolve", "1234567"],
-            "stack_commands.execute_evolve",
-            True,
-            0,
-            {"old_hash": "1234567"},
-        ),
-        (
-            "prefix_rebase_subcommand",
-            ["git-scripts", "prefix", "rebase", "feat/"],
-            "prefix_commands.execute_rebase_prefix",
-            True,
-            0,
-            {"prefix": "feat/"},
-        ),
-        (
-            "prefix_push_subcommand_extra_opts",
-            ["git-scripts", "prefix", "push", "feat/", "--force-with-lease"],
-            "prefix_commands.execute_push_prefix",
-            True,
-            0,
-            {"prefix": "feat/", "push_opts": ["--force-with-lease"]},
-        ),
-        (
-            "prefix_prune_subcommand",
-            ["git-scripts", "prefix", "prune", "feat/"],
-            "cleanup_commands.execute_prune_remote_prefix",
-            True,
-            0,
-            {"prefix": "feat/"},
-        ),
-        (
-            "cleanup_branches_local_subcommand",
+            "batch_push_prefix_option_with_dry_run",
             [
                 "git-scripts",
-                "cleanup",
-                "branches",
+                "batch",
+                "push",
+                "-p",
+                "feat/",
+                "--dry-run",
+                "--force-with-lease",
+            ],
+            "batch_commands.execute_push_prefix",
+            True,
+            0,
+            {
+                "prefix": "feat/",
+                "push_opts": ["--force-with-lease", "--dry-run"],
+            },
+        ),
+        (
+            "batch_prune_local_subcommand",
+            [
+                "git-scripts",
+                "batch",
+                "prune",
                 "local",
-                "--prefix",
+                "develop",
+                "-p",
                 "feat/",
                 "--also-prune-no-upstream",
             ],
-            "cleanup_commands.execute_prune_local",
+            "batch_commands.execute_prune_local",
             True,
             0,
-            {"prefix": "feat/", "also_prune_no_upstream": True},
+            {
+                "target": "develop",
+                "prefix": "feat/",
+                "also_prune_no_upstream": True,
+            },
         ),
         (
-            "cleanup_branches_remote_subcommand",
+            "batch_prune_remote_prefix_option",
             [
                 "git-scripts",
-                "cleanup",
-                "branches",
+                "batch",
+                "prune",
                 "remote",
+                "develop",
+                "-p",
                 "feat/",
                 "--also-prune-no-local",
             ],
-            "cleanup_commands.execute_prune_remote_prefix",
+            "batch_commands.execute_prune_remote_prefix",
             True,
             0,
-            {"prefix": "feat/", "also_prune_no_local": True},
+            {
+                "prefix": "feat/",
+                "target": "develop",
+                "also_prune_no_local": True,
+            },
         ),
         (
             "gk_watch_daemon_subcommand",
@@ -242,19 +192,6 @@ class TestCli(parameterized.TestCase):
                 self.assertEqual(mock_exec.call_args.kwargs[key], val)
 
     @parameterized.named_parameters(
-        (
-            "legacy_gk_optimize_install",
-            [
-                "git-scripts",
-                "gk-optimize",
-                "install",
-                "--keep-recent-tags",
-                "5",
-            ],
-            "execute_gk_install",
-            "success",
-            {"keep_recent_override": 5},
-        ),
         (
             "gk_install_subcommand",
             ["git-scripts", "gk", "install", "--keep-recent-tags", "3"],
@@ -294,29 +231,51 @@ class TestCli(parameterized.TestCase):
             for key, val in expected_kwargs.items():
                 self.assertEqual(mock_exec.call_args.kwargs[key], val)
 
-    def test_prefix_short_help_flag_renders_git_usage_and_examples(self):
+    def test_batch_short_help_flag_renders_git_usage_and_examples(self):
         runner = CliRunner()
         result = runner.invoke(
             app,
-            ["prefix", "-h"],
+            ["batch", "-h"],
             prog_name="git",
             env={"FORCE_COLOR": "1", "TERM": "xterm-256color"},
         )
         output = _strip_ansi(result.output)
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Usage: git prefix", output)
-        self.assertIn("git prefix rebase <prefix> [target]", output)
+        self.assertIn("Usage: git batch", output)
+        self.assertIn("git batch rebase main --prefix feat/", output)
         self.assertIn("Examples:", output)
 
     @parameterized.named_parameters(
-        ("prefix_rebase", ["prefix", "rebase"], "Usage: git prefix rebase"),
-        ("prefix_push", ["prefix", "push"], "Usage: git prefix push"),
-        ("prefix_prune", ["prefix", "prune"], "Usage: git prefix prune"),
         (
-            "cleanup_remote",
-            ["cleanup", "branches", "remote"],
-            "Usage: git cleanup branches remote",
+            "batch_rebase_conflict",
+            ["batch", "rebase", "--current", "--prefix", "feat/"],
+            "Cannot combine --current (-c) and --prefix (-p)",
         ),
+        (
+            "batch_push_conflict",
+            ["batch", "push", "-c", "-p", "feat/"],
+            "Cannot combine --current (-c) and --prefix (-p)",
+        ),
+        (
+            "batch_prune_remote_missing_prefix",
+            ["batch", "prune", "remote"],
+            "Missing branch prefix. Pass --prefix (-p) <pfx>",
+        ),
+    )
+    def test_batch_invalid_flag_combinations_fail_with_recovery_hint(
+        self, args, expected_error
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, args, prog_name="git")
+        output = _strip_ansi(result.output)
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn(expected_error, output)
+
+    @parameterized.named_parameters(
+        ("batch_group", ["batch"], "Usage: git batch"),
+        ("batch_prune_group", ["batch", "prune"], "Usage: git batch prune"),
+        ("gh_group", ["gh"], "Usage: git gh"),
+        ("gk_group", ["gk"], "Usage: git gk"),
     )
     def test_no_args_renders_help_with_usage_and_examples(
         self, args, expected_usage

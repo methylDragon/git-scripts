@@ -11,13 +11,6 @@ lint = "ruff check --fix src/ tests/ media-gen/ && pyright src/ tests/ media-gen
 format = "ruff format src/ tests/ media-gen/ && prek run --group format --all-files"
 test = "pytest -n auto tests/"
 coverage = "pytest --cov=src/git_scripts --cov-report=term-missing tests/"
-git-rebase-prefix = "python -m git_scripts.cli rebase-prefix"
-git-push-prefix = "python -m git_scripts.cli push-prefix"
-git-push-stack = "python -m git_scripts.cli push-stack"
-git-evolve = "python -m git_scripts.cli evolve"
-git-prune-local = "python -m git_scripts.cli prune-local"
-git-prune-remote-prefix = "python -m git_scripts.cli prune-remote-prefix"
-git-gk-optimize = "python -m git_scripts.cli gk-optimize"
 build-gk-shim = "cmake --fresh -S src/git_scripts/gk/optimize/csrc -B build/gk_shim -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/gk_shim"
 
 # --- Media Generation ---

@@ -7,8 +7,9 @@ from typing import Annotated
 import typer
 
 from git_scripts.cli.cli_common import (
-    OptionalPrefixArg,
+    CurrentOpt,
     PlainOpt,
+    PrefixOpt,
     TargetArg,
     YesOpt,
     examples,
@@ -25,8 +26,8 @@ from git_scripts.ui import UI
 gh_app = make_app(
     "Align GitHub PR bases, create missing PRs, and sync gh-stack tables.",
     "git gh align",
-    "git gh align feat/ main --all",
-    "git gh align feat/ main -i --create-missing",
+    "git gh align --prefix feat/ --all",
+    "git gh align main --prefix feat/ -i --create-missing",
 )
 
 
@@ -36,18 +37,13 @@ gh_app = make_app(
 @gh_app.command("align")
 @examples(
     "git gh align",
-    "git gh align feat/ main --all",
-    "git gh align feat/ main -i --create-missing",
+    "git gh align --prefix feat/ --all",
+    "git gh align main --prefix feat/ -i --create-missing",
 )
 def gh_align_pr_bases_and_sync_stacks(
-    prefix: OptionalPrefixArg = None,
     target: TargetArg = "main",
-    current: Annotated[
-        bool,
-        typer.Option(
-            "--current", help="Only align the checked-out linear stack."
-        ),
-    ] = False,
+    current: CurrentOpt = False,
+    prefix: PrefixOpt = None,
     all_matching: Annotated[
         bool,
         typer.Option(

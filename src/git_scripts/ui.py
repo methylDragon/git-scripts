@@ -1,5 +1,6 @@
 """Rich terminal UI components and abstractions."""
 
+import sys
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -10,6 +11,38 @@ import questionary
 from rich.console import Console
 from rich.progress import Progress
 from rich.prompt import Confirm
+
+
+def _use_plain_fallback(*, plain: bool) -> bool:
+    """Returns True when plain mode is active or stdin is not a TTY."""
+    return plain or not sys.stdin.isatty()
+
+
+def _ask_choice_plain(
+    msg: str, choices: list[str], default: str | None = None
+) -> str | None:
+    """Prompts for an indexed choice using standard input."""
+    print(f"{msg}")
+    for i, choice in enumerate(choices):
+        marker = "*" if choice == default else " "
+        print(f"  {i + 1}. [{marker}] {choice}")
+    default_idx = choices.index(default) + 1 if default in choices else 1
+    while True:
+        print(
+            f"Select option (1-{len(choices)}) [Default: {default_idx}]: ",
+            end="",
+            flush=True,
+        )
+        try:
+            ans = input().strip()
+            idx = int(ans) - 1 if ans else -1
+        except (ValueError, EOFError):
+            print()
+            return None
+        if not ans:
+            return default if default else choices[0]
+        if 0 <= idx < len(choices):
+            return choices[idx]
 
 
 @dataclass
@@ -51,7 +84,7 @@ class UI:
         if self.auto_yes:
             return True
 
-        if self.plain:
+        if _use_plain_fallback(plain=self.plain):
             print(f"{msg} [Y/n] ", end="", flush=True)
             try:
                 ans = input().strip().lower()
@@ -76,36 +109,29 @@ class UI:
         if self.auto_yes:
             return default if default else choices[0]
 
-        if self.plain:
-            print(f"{msg}")
-            for i, choice in enumerate(choices):
-                marker = "*" if choice == default else " "
-                print(f"  {i + 1}. [{marker}] {choice}")
-            while True:
-                default_idx = (
-                    choices.index(default) + 1 if default in choices else 1
-                )
-                print(
-                    f"Select option (1-{len(choices)}) "
-                    f"[Default: {default_idx}]: ",
-                    end="",
-                    flush=True,
-                )
-                try:
-                    ans = input().strip()
-                    if not ans:
-                        return default if default else choices[0]
-                    idx = int(ans) - 1
-                    if 0 <= idx < len(choices):
-                        return choices[idx]
-                except (ValueError, EOFError):
-                    print()
-                    return None
+        if _use_plain_fallback(plain=self.plain):
+            return _ask_choice_plain(msg, choices, default=default)
 
         with self.suspend_progress():
             return questionary.select(
                 msg, choices=choices, default=default
             ).ask()
+
+    def _ask_checkbox_plain(
+        self, msg: str, choices: Sequence[str | questionary.Choice]
+    ) -> list[str]:
+        """Prompts for subset selection individually in plain mode."""
+        selected = []
+        print(f"{msg}")
+        for choice in choices:
+            val = (
+                choice.value
+                if isinstance(choice, questionary.Choice)
+                else choice
+            )
+            if self.confirm(f"  Process '{val}'?"):
+                selected.append(val)
+        return selected
 
     def ask_checkbox(
         self, msg: str, choices: Sequence[str | questionary.Choice]
@@ -122,18 +148,8 @@ class UI:
                 for c in choices
             ]
 
-        if self.plain:
-            selected = []
-            print(f"{msg}")
-            for choice in choices:
-                val = (
-                    choice.value
-                    if isinstance(choice, questionary.Choice)
-                    else choice
-                )
-                if self.confirm(f"  Process '{val}'?"):
-                    selected.append(val)
-            return selected
+        if _use_plain_fallback(plain=self.plain):
+            return self._ask_checkbox_plain(msg, choices)
 
         with self.suspend_progress():
             ans = questionary.checkbox(msg, choices=choices).ask()
@@ -149,7 +165,7 @@ class UI:
         if self.auto_yes:
             return
 
-        if self.plain:
+        if _use_plain_fallback(plain=self.plain):
             try:
                 input(f"{msg} ")
             except EOFError:
@@ -165,17 +181,6 @@ class UI:
     def print(self, *args, **kwargs) -> None:
         """Proxies to console.print."""
         self.console.print(*args, **kwargs)
-
-    @contextmanager
-    def spinner(self, message: str):
-        """Displays a spinner while the wrapped block executes."""
-        if self.plain:
-            print(f"{message}...", end="", flush=True)
-            yield None
-            print(" Done.")
-        else:
-            with self.console.status(message) as status:
-                yield status
 
     @cached_property
     def _inflect(self):

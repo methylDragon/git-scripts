@@ -101,3 +101,35 @@ class TestCmdPushPrefix(absltest.TestCase):
         mock_push_branches.assert_called_once_with(
             branches=["feat/3"], options=[], repo_path=self.repo_helper.path
         )
+
+    @mock.patch("git_scripts.cmd.push.push_prefix.run_cmd")
+    @mock.patch("git_scripts.cmd.push.push_prefix.push_branches")
+    def test_execute_push_prefix_dry_run_bypasses_interactive_prompt(
+        self, mock_push_branches, mock_run_cmd
+    ):
+        del mock_run_cmd
+        mock_push_branches.return_value = True
+
+        ui = UI(plain=True, auto_yes=False)
+        with mock.patch.object(ui, "ask_choice") as mock_ask:
+            result = execute_push_prefix(
+                self.repo_helper.path,
+                prefix="feat/",
+                push_opts=["--dry-run"],
+                ui=ui,
+            )
+
+        self.assertTrue(result)
+        mock_ask.assert_not_called()
+        mock_push_branches.assert_called_once_with(
+            branches=["feat/2"],
+            options=["--dry-run"],
+            repo_path=self.repo_helper.path,
+        )
+
+    @mock.patch("git_scripts.cmd.push.push_prefix.run_cmd")
+    def test_execute_push_prefix_rejects_empty_prefix(self, mock_run_cmd):
+        self.assertFalse(
+            execute_push_prefix(self.repo_helper.path, prefix="   ")
+        )
+        mock_run_cmd.assert_not_called()

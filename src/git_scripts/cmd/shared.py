@@ -1,6 +1,6 @@
 """Shared CLI helpers for git-scripts commands."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import pygit2
 from rich.panel import Panel
@@ -117,16 +117,46 @@ class BranchProgressTracker:
             self.progress.advance(self.task_id, advance=advance_by)
 
 
+def get_available_branch_prefixes(
+    repo: pygit2.Repository, *, remote: bool = False
+) -> list[str]:
+    """Returns up to 5 sorted top-level '<segment>/' branch prefixes."""
+    ref_prefix = "refs/remotes/origin/" if remote else "refs/heads/"
+    prefixes: set[str] = set()
+    for ref in repo.references:
+        if not ref.startswith(ref_prefix):
+            continue
+        short_name = ref[len(ref_prefix) :]
+        if "/" in short_name:
+            top_segment = short_name.split("/", 1)[0]
+            prefixes.add(f"{top_segment}/")
+    return sorted(prefixes)[:5]
+
+
+def print_available_prefixes_hint(
+    repo: pygit2.Repository, ui: UI, *, remote: bool = False
+) -> None:
+    """Prints a hint listing existing branch prefixes when a scan finds 0."""
+    available = get_available_branch_prefixes(repo, remote=remote)
+    if not available:
+        return
+    scope_word = "remote " if remote else ""
+    joined = ", ".join(available)
+    ui.print(f"  [dim]💡 Available {scope_word}prefixes: {joined}[/dim]")
+
+
 def resolve_branches_to_push(
     branches: list[str],
     ui: UI,
     prompt_title: str | None = None,
+    *,
+    dry_run: bool = False,
 ) -> list[str]:
     """Helper to prompt the user for which branches to push."""
     if not branches:
         return []
     branches_to_push = list(branches)
-    if not ui.auto_yes:
+    if not ui.auto_yes and not dry_run:
         if prompt_title is None:
             prompt_title = (
                 f"Push {ui.pluralize(len(branches), 'branch')} to origin?"
@@ -144,6 +174,66 @@ def resolve_branches_to_push(
                     "Select branches to push:", choices=branches_to_push
                 )
     return branches_to_push
+
+
+def partition_out_of_sync_branches(
+    repo: pygit2.Repository, branches: Sequence[str]
+) -> tuple[list[str], int]:
+    """Splits local branches into (out_of_sync, up_to_date_count)."""
+    out_of_sync_branches: list[str] = []
+    up_to_date_count = 0
+    for short_name in branches:
+        ref = f"refs/heads/{short_name}"
+        try:
+            local_commit = repo.revparse_single(ref)
+        except KeyError:
+            continue
+        try:
+            remote_commit = repo.revparse_single(
+                f"refs/remotes/origin/{short_name}"
+            )
+        except KeyError:
+            out_of_sync_branches.append(short_name)
+            continue
+        if local_commit.id != remote_commit.id:
+            out_of_sync_branches.append(short_name)
+        else:
+            up_to_date_count += 1
+    return out_of_sync_branches, up_to_date_count
+
+
+def print_two_bucket_prune_summary(
+    primary_branches: Sequence[str],
+    primary_title: str,
+    unmerged_branches: Sequence[str],
+    unmerged_title: str,
+    ui: UI,
+) -> None:
+    """Prints yellow (obsolete) and red (unmerged) prune summary panels."""
+    if primary_branches:
+        branch_list = "\n".join(
+            f"  - [cyan]{b}[/cyan]" for b in primary_branches
+        )
+        ui.print(
+            Panel(
+                branch_list,
+                title=f"[bold yellow]{primary_title}[/bold yellow]",
+                border_style="yellow",
+                expand=False,
+            )
+        )
+    if unmerged_branches:
+        branch_list = "\n".join(
+            f"  - [red]{b}[/red]" for b in unmerged_branches
+        )
+        ui.print(
+            Panel(
+                branch_list,
+                title=f"[bold red]{unmerged_title}[/bold red]",
+                border_style="red",
+                expand=False,
+            )
+        )
 
 
 def select_branches_to_delete(

@@ -25,7 +25,7 @@ Hide
   Type 'tmux set -t git_prune_remote_prefix_demo status-left ""' Enter
   Type 'tmux set -t git_prune_remote_prefix_demo window-status-current-format ""' Enter
   Type 'tmux set -t git_prune_remote_prefix_demo window-status-format ""' Enter
-  Type 'tmux set -t git_prune_remote_prefix_demo status-right "demo: git prune-remote-prefix "' Enter
+  Type 'tmux set -t git_prune_remote_prefix_demo status-right "demo: git batch prune remote "' Enter
   Type "tmux set -t git_prune_remote_prefix_demo pane-border-style 'fg=colour239'" Enter
   Type "tmux set -t git_prune_remote_prefix_demo pane-active-border-style 'fg=#ffcc66'" Enter
   Type "tmux split-window -t git_prune_remote_prefix_demo -v -p 85" Enter
@@ -56,7 +56,7 @@ Hide
   Sleep 500ms
   Type 'export PS1=""' Enter
   
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git prune-remote-prefix' --subtext 'Prunes remote branches with a prefix and checks for obsoletion.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
+  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git batch prune remote' --subtext 'Prunes remote branches with a prefix and checks for obsoletion.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
 
   # Setup Bottom Right Pane (Commands)
   Ctrl+B
@@ -86,14 +86,14 @@ Sleep 6s
 # Run the command
 Ctrl+L
 Type "Cleaning this up safely is hard without checking every single branch." Enter
-Type "Let's use @git prune-remote-prefix demo/@ to intelligently clean up!" Enter
+Type "Let's use @git batch prune remote -p demo/@ to intelligently clean up!" Enter
 Sleep 2s
 
 # Switch to command pane
 Ctrl+B
 Sleep 500ms
 Down
-Type "git prune-remote-prefix demo/"
+Type "git batch prune remote -p demo/"
 Sleep 4s
 Enter
 
