@@ -11,7 +11,7 @@ This directory contains the Python source code for `git-scripts`. The architectu
 
 - **`cli/` (Entrypoint and Command Signatures)**
 
-  - **Responsibility:** Typer/Click command signatures, `Annotated` option types (`cli_common.py`), and group modules (`stack_commands.py`, `prefix_commands.py`, `cleanup_commands.py`, `gh_commands.py`, `gk_commands.py`).
+  - **Responsibility:** Typer/Click command signatures, `Annotated` option types (`cli_common.py`), and group modules (`batch_commands.py`, `gh_commands.py`, `gk_commands.py`).
   - **Boundary:** Maps CLI inputs to the corresponding orchestrator in `cmd/`. Does not implement domain logic.
 
 - **`models.py` (Data)**

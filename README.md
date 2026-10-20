@@ -22,7 +22,7 @@ We'll:
 
 ### `git batch rebase --prefix <pfx>`
 
-![git rebase-prefix demo](media-gen/media/rebase_prefix.gif)
+![git batch rebase --prefix demo](media-gen/media/rebase_prefix.gif)
 
 ### `git evolve`
 
@@ -30,11 +30,11 @@ We'll:
 
 ### `git batch push`
 
-![git push-stack demo](media-gen/media/push_stack.gif)
+![git batch push demo](media-gen/media/push_stack.gif)
 
 ### `git gh align`
 
-![git gh-align-pr-bases-and-sync-stacks demo](media-gen/media/gh_align_pr_bases_and_sync_stacks.gif)
+![git gh align demo](media-gen/media/gh_align_pr_bases_and_sync_stacks.gif)
 
 We also have other functionalities for mass pushing beyond stacks, and cleaning up the local and remote repos!
 
@@ -43,15 +43,15 @@ We also have other functionalities for mass pushing beyond stacks, and cleaning 
 
 ### `git batch push --prefix <pfx>`
 
-![git push-prefix demo](media-gen/media/push_prefix.gif)
+![git batch push --prefix demo](media-gen/media/push_prefix.gif)
 
 ### `git batch prune remote --prefix <pfx>`
 
-![git prune-remote-prefix demo](media-gen/media/prune_remote_prefix.gif)
+![git batch prune remote demo](media-gen/media/prune_remote_prefix.gif)
 
 ### `git batch prune local`
 
-![git prune-local demo](media-gen/media/prune_local.gif)
+![git batch prune local demo](media-gen/media/prune_local.gif)
 
 </details>
 
@@ -75,7 +75,7 @@ This sets up the environment and creates symlinks to `~/.local/bin` directly fro
 
 1. **Verify:** Ensure `~/.local/bin` is in your system's `$PATH`.
 
-The installer creates native Git subcommands! Because the executables are prefixed with `git-` and placed in your `PATH`, Git automatically recognizes them.
+The installer creates native Git subcommands, configures Bash tab-completion (`~/.bash_completion`), and wires `git <cmd> --help` to render CLI help directly. Because the executables are prefixed with `git-` and placed in your `PATH`, Git automatically recognizes them.
 
 To update the scripts later, simply run:
 
@@ -91,14 +91,14 @@ You can invoke these scripts just like native Git commands:
 
 Running any parent command (`git batch`, `git gh`, or `git gk`) without arguments displays its available subcommands.
 
-| Command                                                                                                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| :--------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`git batch rebase [target] [--current\|-c] [-p/--prefix <pfx>] [--all-worktrees] [--auto-delete] [-n]`** | **Stack / Prefix Rebase.** Rebases the current linear stack (default, or `--current`) or all branch stacks matching `--prefix <pfx>` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream.                                                                                                                                                                                                                                                                               |
-| **`git batch push [--current\|-c] [-p/--prefix <pfx>] [--target <branch>] [-n] [opts]`**                   | **Stack / Prefix Push.** Pushes all out-of-sync branches in the current linear stack (default, or `--current`) or all local branches matching `--prefix <pfx>` to `origin`. Forwards extra args (e.g., `--force-with-lease`) to `git push`.                                                                                                                                                                                                                                                                      |
-| **`git batch prune local [target] [-p/--prefix <pfx>] [-n/--dry-run] [--also-prune-no-upstream]`**         | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone (optionally scoped to `--prefix`). Use `--also-prune-no-upstream` to also prune branches lacking upstream tracking (checking obsolescence against `target`, default: `main`).                                                                                                                                                                                                                                                  |
-| **`git batch prune remote [target] -p/--prefix <pfx> [-n/--dry-run] [--also-prune-no-local]`**             | **Remote Cleanup.** Deletes remote `origin/<pfx>*` branches that are fully merged or squash-merged into `target` (default: `main`). Use `--also-prune-no-local` to also inspect remote branches lacking a local counterpart.                                                                                                                                                                                                                                                                                     |
-| **`git evolve [old_hash]`**                                                                                | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted.                                                                                                                                                                                                                                                                                                                                        |
-| **`git gk <install/verify/uninstall> [repo] [--config] [--keep-recent-tags]`**                             | **GitKraken Worktree Optimizer.** Improves GitKraken performance on large repositories and linked worktrees by pruning file-watcher directory traversal, making cached tab switches non-blocking, disabling commit detail panel transition lag in memory, retaining a rolling window of CI tags and remote release branches, enabling commit-graph and untracked-cache acceleration, and auto-refreshing linked worktrees. See [`src/git_scripts/gk/optimize/README.md`](src/git_scripts/gk/optimize/README.md). |
+| Command                                                                                                       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| :------------------------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`git batch rebase [target] [--current\|-c] [-p/--prefix <pfx>] [--all-worktrees] [--auto-delete] [-n]`**    | **Stack / Prefix Rebase.** Rebases the current linear stack (default, or `--current`) or all branch stacks matching `--prefix <pfx>` onto `target` (default: `main`). Preserves topology; skips commits already squashed upstream.                                                                                                                                                                                                                                                                               |
+| **`git batch push [--current\|-c] [-p/--prefix <pfx>] [--target <branch>] [-n] [opts]`**                      | **Stack / Prefix Push.** Pushes all out-of-sync branches in the current linear stack (default, or `--current`) or all local branches matching `--prefix <pfx>` to `origin`. Forwards extra args (e.g., `--force-with-lease`) to `git push`.                                                                                                                                                                                                                                                                      |
+| **`git batch prune local [target] [-p/--prefix <pfx>] [-n/--dry-run] [--also-prune-no-upstream]`**            | **Local Cleanup.** Deletes local branches whose remote tracking branches are gone (optionally scoped to `--prefix`). Use `--also-prune-no-upstream` to also prune branches lacking upstream tracking (checking obsolescence against `target`, default: `main`).                                                                                                                                                                                                                                                  |
+| **`git batch prune remote [target] -p/--prefix <pfx> [-n/--dry-run] [--also-prune-no-local]`**                | **Remote Cleanup.** Deletes remote `origin/<pfx>*` branches that are fully merged or squash-merged into `target` (default: `main`). Use `--also-prune-no-local` to also inspect remote branches lacking a local counterpart.                                                                                                                                                                                                                                                                                     |
+| **`git evolve [old_hash]`**                                                                                   | **Rescue Orphans.** Run immediately after `git commit --amend` to rebase child branches onto the new HEAD automatically. Calculates from reflog if `old_hash` is omitted.                                                                                                                                                                                                                                                                                                                                        |
+| **`git gk <install/verify/uninstall> [repo] [--config] [--keep-recent-tags] [--close-gitkraken] [--expect]`** | **GitKraken Worktree Optimizer.** Improves GitKraken performance on large repositories and linked worktrees by pruning file-watcher directory traversal, making cached tab switches non-blocking, disabling commit detail panel transition lag in memory, retaining a rolling window of CI tags and remote release branches, enabling commit-graph and untracked-cache acceleration, and auto-refreshing linked worktrees. See [`src/git_scripts/gk/optimize/README.md`](src/git_scripts/gk/optimize/README.md). |
 
 > **Note:** All commands support `--plain` (disables rich UI formatting) and `-y/--yes` (bypasses confirmation prompts).
 
@@ -107,9 +107,9 @@ Running any parent command (`git batch`, `git gh`, or `git gk`) without argument
 These commands are strictly for GitHub repositories and require the [GitHub CLI (`gh`)](https://cli.github.com/) to be installed and authenticated (`gh auth login`).
 **Recommended:** Install the [github/gh-stack](https://github.com/github/gh-stack) extension (`gh extension install github/gh-stack`) to automatically link PRs into stack tables of contents!
 
-| Command                                                                                 | Description                                                                                                                                                                                                                                                                                                                        |
-| :-------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`git gh align [target] [--current\|-c] [-p/--prefix <pfx>] [--all\|-i] [-r <name>]`** | **GitHub PR Sync.** Modifies the base branch of GitHub Pull Requests to match your local topological history, prompts to push out-of-sync local branches or create missing PRs (populating repo PR templates automatically), and synchronizes `gh stack` links. Defaults to syncing the current branch's linear stack up to trunk. |
+| Command                                                                                                    | Description                                                                                                                                                                                                                                                                                                                        |
+| :--------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`git gh align [target] [--current\|-c] [-p/--prefix <pfx>] [--all\|-i] [--create-missing] [-r <name>]`** | **GitHub PR Sync.** Modifies the base branch of GitHub Pull Requests to match your local topological history, prompts to push out-of-sync local branches or create missing PRs (populating repo PR templates automatically), and synchronizes `gh stack` links. Defaults to syncing the current branch's linear stack up to trunk. |
 
 ### Working with Worktrees
 
