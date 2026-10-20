@@ -13,65 +13,8 @@ Set TypingSpeed 10ms
 
 # Setup
 Hide
-  Type "tmux kill-session -t git_push_stack_demo 2>/dev/null || true" Enter
-  Type "rm -rf /tmp/vhs-repo-push-stack" Enter
-  Type "pixi run -q python media-gen/setup_demo_repo.py --scenario push-stack > /dev/null" Enter
-  Type "export GIT_CONFIG_GLOBAL=/dev/null" Enter
-  Type "export GIT_CONFIG_SYSTEM=/dev/null" Enter
-  Type "export PATH=/tmp/vhs-repo-push-stack:$PATH" Enter
-  Type "tmux new-session -s git_push_stack_demo -d" Enter
-  Type "tmux set -t git_push_stack_demo status on" Enter
-  Type "tmux set -t git_push_stack_demo status-style 'bg=default,fg=white'" Enter
-  Type 'tmux set -t git_push_stack_demo status-left ""' Enter
-  Type 'tmux set -t git_push_stack_demo window-status-current-format ""' Enter
-  Type 'tmux set -t git_push_stack_demo window-status-format ""' Enter
-  Type 'tmux set -t git_push_stack_demo status-right "demo: git batch push "' Enter
-  Type "tmux set -t git_push_stack_demo pane-border-style 'fg=colour239'" Enter
-  Type "tmux set -t git_push_stack_demo pane-active-border-style 'fg=#ffcc66'" Enter
-  Type "tmux split-window -t git_push_stack_demo -v -p 85" Enter
-  Type "tmux select-pane -t git_push_stack_demo:0.1" Enter
-  Type "tmux split-window -t git_push_stack_demo -h -p 50" Enter
-  Type "tmux attach-session -t git_push_stack_demo" Enter
-  Ctrl+L
-
-  # Setup Left Pane (Graph)
-  Ctrl+B
-  Sleep 500ms
-  Left
-  Sleep 500ms
-  Type "export PATH=/tmp/vhs-repo-gh-align:$PATH" Enter
-  Type "cd /tmp/vhs-repo-push-stack" Enter
-  Type 'export PS1="> "' Enter
-  Ctrl+L
-  Type "watch -c -t -n 1 'git log --graph --oneline --all --decorate --color'" Enter
-  Sleep 500ms
-
-  # Setup Top Right Pane (Comments)
-  Ctrl+B
-  Sleep 500ms
-  Right
-  Ctrl+B
-  Sleep 500ms
-  Up
-  Sleep 500ms
-  Type 'export PS1=""' Enter
-  
-  Type "clear; pixi run -q python media-gen/vhs_utils.py banner 'git batch push' --subtext 'Pushes all branches in the current stack to the remote.'; pixi run -q python media-gen/vhs_utils.py comment_reader" Enter
-
-  # Setup Bottom Right Pane (Commands)
-  Ctrl+B
-  Sleep 500ms
-  Down
-  Sleep 500ms
-  Type "export PATH=/tmp/vhs-repo-gh-align:$PATH" Enter
-  Type "cd /tmp/vhs-repo-push-stack" Enter
-  Type 'export PS1="> "' Enter
-  Ctrl+L
-
-  # Initial State Exploration
-  Ctrl+B
-  Sleep 500ms
-  Up
+  Type "python3 media-gen/setup_demo_repo.py --scenario push-stack --attach" Enter
+  Sleep 1s
 Show
 
 Sleep 4s
@@ -92,6 +35,7 @@ Sleep 2s
 Ctrl+B
 Sleep 500ms
 Down
+Sleep 200ms
 Type "git batch push"
 Sleep 4s
 Enter
@@ -103,6 +47,7 @@ Sleep 2s
 Ctrl+B
 Sleep 500ms
 Up
+Sleep 200ms
 Ctrl+L
 Type "The tool detected the entire lineage of branches up to trunk! (e.g., @demo/d@ ... @demo/d-e-f-g-h-i@)" Enter
 Type "We'll confirm pushing all of them by selecting 'Push all'." Enter
@@ -112,6 +57,7 @@ Sleep 2s
 Ctrl+B
 Sleep 500ms
 Down
+Sleep 200ms
 Sleep 4s
 Enter
 Sleep 6s
@@ -120,16 +66,8 @@ Sleep 6s
 Ctrl+B
 Sleep 500ms
 Up
+Sleep 200ms
 Ctrl+L
 Type "Hooray! The entire stack leading up to our current branch was safely pushed in the correct order!" Enter
 Sleep 6s
-
-# Cleanup
-Sleep 3s
-Hide
-  Type "tmux capture-pane -p -t git_push_stack_demo:0.2 > /tmp/vhs-out.txt" Enter
-  Sleep 1s
-  Type "cd /tmp" Enter
-  Type "rm -rf /tmp/vhs-repo-push-stack" Enter
-Show
 
